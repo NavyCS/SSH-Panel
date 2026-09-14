@@ -191,10 +191,12 @@ class SshConfigManager {
     if (host.isEmpty) return false;
     final trimmed = host.trim();
     if (trimmed.isEmpty) return false;
-    // Reject anything with whitespace, control chars, or shell metachars.
-    if (RegExp(r'[\s\x00-\x1f;&|<>"\'\\$`!#?*~\[\]{}()]+').hasMatch(trimmed)) {
-      return false;
-    }
+    // Reject whitespace and control characters.
+    if (RegExp(r'[\s\x00-\x1f]').hasMatch(trimmed)) return false;
+    // Reject shell metacharacters that could break out of ssh-keyscan.
+    const forbidden =
+        '<>&|;"\'\\$`!#?*~[]{}()';
+    if (trimmed.split('').any((c) => forbidden.contains(c))) return false;
     // Each label must be 1-63 chars, total ≤ 253, no leading/trailing dot/dash.
     if (trimmed.length > 253) return false;
     final labels = trimmed.split('.');

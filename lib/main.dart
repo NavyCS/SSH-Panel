@@ -1065,7 +1065,13 @@ void _openSshFolder() {
                                           onPressed: _loading || _checkingHosts.contains(host)
                                               ? null
                                               : () => _checkHost(host),
-                                          child: const Text('Check'),
+                                          child: _checkingHosts.contains(host)
+                                              ? const SizedBox(
+                                                  width: 12,
+                                                  height: 12,
+                                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                                )
+                                              : const Text('Check'),
                                         ),
                                       ),
                                       const SizedBox(width: 6),

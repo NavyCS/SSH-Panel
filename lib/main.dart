@@ -770,6 +770,8 @@ class _DomainsTabState extends State<DomainsTab> {
   List<String> _knownHosts = [];
   bool _loading = false;
   String? _error;
+  final Map<String, String?> _hostStatus = {};
+  final Set<String> _checkingHosts = {};
 
   @override
   void initState() {
@@ -846,16 +848,13 @@ void _openSshFolder() {
     Process.run('explorer', [dir], runInShell: false);
   }
 
-  Future<void> _addKnownHost() async {
-    final host = _hostController.text.trim();
-    if (host.isEmpty) return;
+  Future<void> _removeKnownHost(String host) async {
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      await _configManager.addKnownHost(host);
-      _hostController.clear();
+      _configManager.removeKnownHost(host);
       await _refresh();
     } on SshConfigException catch (e) {
       if (!mounted) return;
@@ -872,13 +871,52 @@ void _openSshFolder() {
     }
   }
 
-  Future<void> _removeKnownHost(String host) async {
+  Future<void> _checkHost(String host) async {
+    if (_checkingHosts.contains(host)) return;
+    _checkingHosts.add(host);
+    setState(() {
+      _hostStatus[host] = null;
+    });
+    try {
+      final keys = await _configManager.scanHost(host);
+      if (!mounted) return;
+      setState(() {
+        _hostStatus[host] = keys.isEmpty
+            ? 'Unreachable'
+            : '${keys.length} key(s) found';
+      });
+    } on SshConfigException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _hostStatus[host] = 'Error: ${e.message}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _hostStatus[host] = 'Error';
+      });
+    } finally {
+      _checkingHosts.remove(host);
+    }
+  }
+
+  Future<void> _addKnownHost() async {
+    final host = _hostController.text.trim();
+    if (host.isEmpty) return;
+    if (!SshConfigManager.isValidHost(host)) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Invalid host name: "$host".';
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      _configManager.removeKnownHost(host);
+      await _configManager.addKnownHost(host);
+      _hostController.clear();
       await _refresh();
     } on SshConfigException catch (e) {
       if (!mounted) return;
@@ -1020,6 +1058,25 @@ void _openSshFolder() {
                                           style: theme.textTheme.small,
                                         ),
                                       ),
+                                      ShadTooltip(
+                                        builder: (context) => Text(host),
+                                        child: ShadButton.ghost(
+                                          size: ShadButtonSize.sm,
+                                          onPressed: _loading || _checkingHosts.contains(host)
+                                              ? null
+                                              : () => _checkHost(host),
+                                          child: const Text('Check'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      if (_hostStatus[host] != null)
+                                        ShadBadge(
+                                          child: Text(
+                                            _hostStatus[host]!,
+                                            style: const TextStyle(fontSize: 10),
+                                          ),
+                                        ),
+                                      const SizedBox(width: 6),
                                       ShadTooltip(
                                         builder: (context) => Text(host),
                                         child: ShadButton.ghost(

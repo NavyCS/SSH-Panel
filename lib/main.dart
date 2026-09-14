@@ -132,7 +132,6 @@ class _SshPanelShellState extends State<SshPanelShell> {
       );
     }
   }
-}
 
 // ===========================================================================
 // Service tab
@@ -1102,8 +1101,8 @@ return ListView(
                                     ],
                                   ),
                                 ),
-),
-                  ],
+],
+                  ),
                 ),
               ],
             ),
@@ -1111,5 +1110,3 @@ return ListView(
         ],
       );
     }
-  }
-}

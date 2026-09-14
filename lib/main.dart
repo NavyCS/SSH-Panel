@@ -661,21 +661,25 @@ class _KeysTabState extends State<KeysTab> {
                                       style: theme.textTheme.small,
                                     ),
                                   ),
-                                  ShadButton.ghost(
-                                    size: ShadButtonSize.sm,
-                                    tooltip: path,
-                                    onPressed: _loading
-                                        ? null
-                                        : () => _addKey(path),
-                                    child: const Text('Load'),
+                                  ShadTooltip(
+                                    builder: (context) => Text(path),
+                                    child: ShadButton.ghost(
+                                      size: ShadButtonSize.sm,
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _addKey(path),
+                                      child: const Text('Load'),
+                                    ),
                                   ),
-                                  ShadButton.ghost(
-                                    size: ShadButtonSize.sm,
-                                    tooltip: path,
-                                    onPressed: _loading
-                                        ? null
-                                        : () => _removeKey(path),
-                                    child: const Text('Unload'),
+                                  ShadTooltip(
+                                    builder: (context) => Text(path),
+                                    child: ShadButton.ghost(
+                                      size: ShadButtonSize.sm,
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _removeKey(path),
+                                      child: const Text('Unload'),
+                                    ),
                                   ),
                                 ],
                               ),

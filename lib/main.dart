@@ -603,10 +603,6 @@ class _KeysTabState extends State<KeysTab> {
                 onPressed: _loading ? null : _generateKey,
                 child: const Text('Generate'),
               ),
-              ShadButton.outline(
-                onPressed: _loading ? null : _removeAll,
-                child: const Text('Remove All'),
-              ),
               ShadButton.ghost(
                 onPressed: _loading ? null : _refresh,
                 child: const Icon(LucideIcons.refreshCw, size: 16),
@@ -667,21 +663,34 @@ class _KeysTabState extends State<KeysTab> {
                                   ),
                                   ShadButton.ghost(
                                     size: ShadButtonSize.sm,
+                                    tooltip: path,
                                     onPressed: _loading
                                         ? null
                                         : () => _addKey(path),
-                                    child: const Text('Add'),
+                                    child: const Text('Load'),
                                   ),
                                   ShadButton.ghost(
                                     size: ShadButtonSize.sm,
+                                    tooltip: path,
                                     onPressed: _loading
                                         ? null
                                         : () => _removeKey(path),
-                                    child: const Text('Remove'),
+                                    child: const Text('Unload'),
                                   ),
                                 ],
                               ),
                             ),
+                          const SizedBox(height: 12),
+                          ShadAlert(
+                            icon: const Icon(LucideIcons.info, size: 16),
+                            title: const Text('How keys work'),
+                            description: const Text(
+                              'Load copies the private key into the running '
+                              'ssh-agent so it can authenticate without asking '
+                              'for the passphrase each time. Unload removes it '
+                              'from the agent. Keys are not deleted from disk.',
+                            ),
+                          ),
                         ],
                       ),
           ),

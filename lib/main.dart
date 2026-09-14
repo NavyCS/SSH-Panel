@@ -1109,6 +1109,5 @@ return ListView(
           ),
         ],
       );
-    }
   }
 }

@@ -1076,10 +1076,17 @@ void _openSshFolder() {
                                       ),
                                       const SizedBox(width: 6),
                                       if (_hostStatus[host] != null)
-                                        ShadBadge(
-                                          child: Text(
-                                            _hostStatus[host]!,
-                                            style: const TextStyle(fontSize: 10),
+                                        ShadTooltip(
+                                          builder: (context) => Text(
+                                            _hostStatus[host] == 'Unreachable'
+                                                ? '$host did not respond to ssh-keyscan.'
+                                                : '$host publishes ${_hostStatus[host]} — one line per key algorithm (RSA, ED25519, ECDSA, etc.). This is what gets added to known_hosts.',
+                                          ),
+                                          child: ShadBadge(
+                                            child: Text(
+                                              _hostStatus[host]!,
+                                              style: const TextStyle(fontSize: 10),
+                                            ),
                                           ),
                                         ),
                                       const SizedBox(width: 6),

@@ -144,15 +144,16 @@ class SshConfigManager {
   // getKnownHosts
   // -----------------------------------------------------------------------
 
-  /// Extracts hostnames from `~/.ssh/known_hosts`.
+  /// Extracts host entries from `~/.ssh/known_hosts`.
   ///
   /// Each entry in the known_hosts file has the format
-  /// `hostname,key-type,key [comment]`.  This method returns the first
-  /// token (hostname) of each non-empty line, trimmed of whitespace.
+  /// `hostname[,hostname2] keytype keydata [comment]`.  This method
+  /// returns a list of maps with keys `'host'` and `'keyType'` for
+  /// each non-empty line.
   ///
   /// Returns `[]` when the file does not exist or is empty — **never
   /// throws** for a missing or empty file.
-  List<String> getKnownHosts() {
+  List<Map<String, String>> getKnownHosts() {
     final file = File(_knownHostsPath);
     if (!file.existsSync()) {
       return [];
@@ -166,7 +167,13 @@ class SshConfigManager {
           .split('\n')
           .map((line) => line.trim())
           .where((line) => line.isNotEmpty && !line.startsWith('#'))
-          .map((line) => line.split(RegExp(r'\s+')).first)
+          .map((line) {
+            final tokens = line.split(RegExp(r'\s+'));
+            final hostField = tokens.isNotEmpty ? tokens[0] : '';
+            final host = hostField.split(',').first;
+            final keyType = tokens.length > 1 ? tokens[1] : '';
+            return <String, String>{'host': host, 'keyType': keyType};
+          })
           .toList();
     } on FileSystemException catch (e) {
       throw SshConfigException(
@@ -242,16 +249,13 @@ class SshConfigManager {
     return output.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
   }
 
-  /// Adds a host to `~/.ssh/known_hosts` by running `ssh-keyscan`.
+  /// Returns the raw key lines from `ssh-keyscan` for [host], or throws.
   ///
-  /// Fetches the host's public key(s) and appends the result to
-  /// `known_hosts`. If the host already has an entry it is replaced (the
-  /// old line is removed first).
-  ///
-  /// Throws [SshConfigException] with code [SshConfigErrorCode.invalidHost]
-  /// if [host] is empty or malformed, or [SshConfigErrorCode.keyscanFailed]
-  /// if `ssh-keyscan` is unavailable or the host cannot be resolved.
-  Future<void> addKnownHost(String host) async {
+  /// Validates the host, runs `ssh-keyscan`, and returns the list of full
+  /// key lines (e.g. `github.com ssh-ed25519 AAAAC3…`).  Throws
+  /// [SshConfigException] if the host is invalid, unreachable, or
+  /// `ssh-keyscan` is missing.
+  Future<List<String>> scanHostKeys(String host) async {
     if (!isValidHost(host)) {
       throw SshConfigException(
         SshConfigErrorCode.invalidHost,
@@ -266,16 +270,81 @@ class SshConfigManager {
         'Host $host is unreachable — no keys found.',
       );
     }
+    return keys;
+  }
 
-    // Remove any existing entries for this host before appending.
-    removeKnownHost(host);
+  /// Writes the selected [keyLines] for [host] to `~/.ssh/known_hosts`,
+  /// replacing only the entries whose key type matches one of the lines
+  /// being written.  Entries for other key types of the same host are
+  /// preserved.
+  Future<void> writeKnownHostKeys(String host, List<String> keyLines) async {
+    // Collect the key types being written so we can remove only those.
+    final keyTypesToReplace = <String>{};
+    for (final line in keyLines) {
+      final tokens = line.split(RegExp(r'\s+'));
+      if (tokens.length > 1) keyTypesToReplace.add(tokens[1]);
+    }
 
     final file = File(_knownHostsPath);
+    if (file.existsSync()) {
+      final lines = file.readAsLinesSync();
+      final filtered = lines
+          .where((line) {
+            final trimmed = line.trim();
+            if (trimmed.isEmpty || trimmed.startsWith('#')) return true;
+            final tokens = trimmed.split(RegExp(r'\s+'));
+            final lineHost = tokens.isNotEmpty ? tokens[0].split(',').first : '';
+            final lineKeyType = tokens.length > 1 ? tokens[1] : '';
+            // Keep the line if it's for a different host, or for the same
+            // host but a key type we are NOT replacing.
+            return lineHost != host || !keyTypesToReplace.contains(lineKeyType);
+          })
+          .toList();
+      try {
+        file.writeAsStringSync(filtered.join('\n'));
+      } on FileSystemException catch (e) {
+        throw SshConfigException(
+          SshConfigErrorCode.writeFailed,
+          'Failed to write ~/.ssh/known_hosts.',
+          rawDetail: e.message,
+        );
+      }
+    }
+
     try {
       if (!file.parent.existsSync()) {
         file.parent.createSync(recursive: true);
       }
-      file.writeAsStringSync('${keys.join('\n')}\n', mode: FileMode.append);
+      file.writeAsStringSync('${keyLines.join('\n')}\n', mode: FileMode.append);
+    } on FileSystemException catch (e) {
+      throw SshConfigException(
+        SshConfigErrorCode.writeFailed,
+        'Failed to write ~/.ssh/known_hosts.',
+        rawDetail: e.message,
+      );
+    }
+  }
+
+  /// Internal helper: removes **all** entries whose host field matches
+  /// [host], regardless of key type.  Used by [addKnownHost] to replace
+  /// the full set of keys for a host.
+  void _removeAllHostEntries(String host) {
+    final file = File(_knownHostsPath);
+    if (!file.existsSync()) return;
+
+    final lines = file.readAsLinesSync();
+    final filtered = lines
+        .where((line) {
+          final trimmed = line.trim();
+          if (trimmed.isEmpty || trimmed.startsWith('#')) return true;
+          final tokens = trimmed.split(RegExp(r'\s+'));
+          final lineHost = tokens.isNotEmpty ? tokens[0].split(',').first : '';
+          return lineHost != host;
+        })
+        .toList();
+
+    try {
+      file.writeAsStringSync(filtered.join('\n'));
     } on FileSystemException catch (e) {
       throw SshConfigException(
         SshConfigErrorCode.writeFailed,
@@ -289,19 +358,27 @@ class SshConfigManager {
   // removeKnownHost
   // -----------------------------------------------------------------------
 
-  /// Removes all entries for [host] from `~/.ssh/known_hosts`.
+  /// Removes the specific entry for [host] with [keyType] from
+  /// `~/.ssh/known_hosts`.
   ///
-  /// Does nothing if the file does not exist or the host is not present.
+  /// Matches lines where the host field (first comma-separated token)
+  /// equals [host] **and** the key type (second whitespace token) equals
+  /// [keyType].  Does nothing if no matching line is found.
   /// Throws [SshConfigException] only on I/O errors.
-  void removeKnownHost(String host) {
+  void removeKnownHost(String host, String keyType) {
     final file = File(_knownHostsPath);
     if (!file.existsSync()) return;
 
     final lines = file.readAsLinesSync();
     final filtered = lines
-        .where((line) => line.trim().isEmpty ||
-            line.trim().startsWith('#') ||
-            line.split(RegExp(r'\s+')).first != host)
+        .where((line) {
+          final trimmed = line.trim();
+          if (trimmed.isEmpty || trimmed.startsWith('#')) return true;
+          final tokens = trimmed.split(RegExp(r'\s+'));
+          final lineHost = tokens.isNotEmpty ? tokens[0].split(',').first : '';
+          final lineKeyType = tokens.length > 1 ? tokens[1] : '';
+          return lineHost != host || lineKeyType != keyType;
+        })
         .toList();
 
     try {

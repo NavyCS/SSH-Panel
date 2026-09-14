@@ -132,8 +132,6 @@ class _SshPanelShellState extends State<SshPanelShell> {
 );
     }
   }
-}
-  }
 
 // ===========================================================================
 // Service tab
@@ -769,7 +767,7 @@ class _DomainsTabState extends State<DomainsTab> {
   final _configManager = SshConfigManager();
   late TextEditingController _configController;
   late final TextEditingController _hostController;
-  List<String> _knownHosts = [];
+  List<Map<String, String>> _knownHosts = [];
   bool _loading = false;
   String? _error;
   final Map<String, String?> _hostStatus = {};
@@ -850,13 +848,34 @@ void _openSshFolder() {
     Process.run('explorer', [dir], runInShell: false);
   }
 
-  Future<void> _removeKnownHost(String host) async {
+  Future<void> _removeKnownHost(String host, String keyType) async {
+    final confirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => ShadDialog(
+        title: const Text('Remove known host'),
+        description: Text(
+          'Remove the $keyType entry for "$host" from known_hosts?',
+        ),
+        actions: [
+          ShadButton.outline(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ShadButton.destructive(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      _configManager.removeKnownHost(host);
+      _configManager.removeKnownHost(host, keyType);
       await _refresh();
     } on SshConfigException catch (e) {
       if (!mounted) return;
@@ -882,10 +901,17 @@ void _openSshFolder() {
     try {
       final keys = await _configManager.scanHost(host);
       if (!mounted) return;
+      final keyTypes = keys
+          .map((line) => line.split(RegExp(r'\s+')).length > 1
+              ? line.split(RegExp(r'\s+'))[1]
+              : '')
+          .where((t) => t.isNotEmpty)
+          .toSet()
+          .toList();
       setState(() {
         _hostStatus[host] = keys.isEmpty
             ? 'Unreachable'
-            : '${keys.length} key(s) found';
+            : keyTypes.join(', ');
       });
     } on SshConfigException catch (e) {
       if (!mounted) return;
@@ -902,7 +928,7 @@ void _openSshFolder() {
     }
   }
 
-  Future<void> _addKnownHost() async {
+Future<void> _addKnownHost() async {
     final host = _hostController.text.trim();
     if (host.isEmpty) return;
     if (!SshConfigManager.isValidHost(host)) {
@@ -916,8 +942,121 @@ void _openSshFolder() {
       _loading = true;
       _error = null;
     });
+    List<String> keyLines;
     try {
-      await _configManager.addKnownHost(host);
+      keyLines = await _configManager.scanHostKeys(host);
+    } on SshConfigException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    // Parse each line into (keyType, fullLine) pairs.
+    final entries = <Map<String, String>>[];
+    for (final line in keyLines) {
+      final tokens = line.split(RegExp(r'\s+'));
+      final keyType = tokens.length > 1 ? tokens[1] : '';
+      entries.add(<String, String>{'keyType': keyType, 'line': line});
+    }
+
+    // Filter out key types that already exist for this host.
+    final existingKeyTypes = _knownHosts
+        .where((h) => h['host'] == host)
+        .map((h) => h['keyType']!)
+        .toSet();
+    final available = entries
+        .where((e) => !existingKeyTypes.contains(e['keyType']))
+        .toList();
+
+    if (available.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Host "$host" already has all of these key types in known_hosts.';
+      });
+      return;
+    }
+
+    // Show a dialog with checkboxes for each key type.
+    final selected = <int>{};
+    for (var i = 0; i < available.length; i++) {
+      selected.add(i);
+    }
+
+    final confirmed = await showShadDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) => ShadDialog(
+          title: Text('Add $host to known_hosts'),
+          description: const Text(
+            'Select the key algorithms to add. All are selected by default.',
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              for (var i = 0; i < available.length; i++)
+                Row(
+                  children: [
+                    ShadCheckbox(
+                      value: selected.contains(i),
+                      onChanged: (value) {
+                        setStateDialog(() {
+                          if (value) {
+                            selected.add(i);
+                          } else {
+                            selected.remove(i);
+                          }
+                        });
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      available[i]['keyType']!,
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+          actions: [
+            ShadButton.outline(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ShadButton(
+              onPressed: selected.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(true),
+              child: const Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || selected.isEmpty) return;
+
+    final chosenLines = selected
+        .map((i) => available[i]['line']!)
+        .toList();
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await _configManager.writeKnownHostKeys(host, chosenLines);
       _hostController.clear();
       await _refresh();
     } on SshConfigException catch (e) {
@@ -935,11 +1074,95 @@ void _openSshFolder() {
     }
   }
 
+Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
+    final host = entry['host']!;
+    final keyType = entry['keyType']!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          const Icon(
+            LucideIcons.globe,
+            size: 14,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  host,
+                  style: theme.textTheme.small,
+                  softWrap: true,
+                ),
+                if (keyType.isNotEmpty)
+                  Text(
+                    keyType,
+                    style: theme.textTheme.muted,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ShadTooltip(
+            builder: (context) => Text(host),
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: _loading || _checkingHosts.contains(host)
+                  ? null
+                  : () => _checkHost(host),
+              child: _checkingHosts.contains(host)
+                  ? const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Check'),
+            ),
+          ),
+          const SizedBox(width: 6),
+          if (_hostStatus[host] != null)
+            ShadTooltip(
+              builder: (context) => Text(
+                _hostStatus[host] == 'Unreachable'
+                    ? 'Did not respond to ssh-keyscan.'
+                    : _hostStatus[host]!,
+              ),
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: () {},
+                child: ShadBadge(
+                  child: Text(
+                    _hostStatus[host] == 'Unreachable'
+                        ? 'Unreachable'
+                        : '${_hostStatus[host]!.split(', ').length} key(s) found',
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(width: 6),
+          ShadTooltip(
+            builder: (context) => Text(host),
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: _loading
+                  ? null
+                  : () => _removeKnownHost(host, keyType),
+              child: const Text('Remove'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
 
-return ListView(
+  return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
           // ---- Error banner ----
@@ -1042,73 +1265,14 @@ return ListView(
                           )
                         : Column(
                             children: [
-                              for (final host in _knownHosts)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        LucideIcons.globe,
-                                        size: 14,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          host,
-                                          style: theme.textTheme.small,
-                                        ),
-                                      ),
-                                      ShadTooltip(
-                                        builder: (context) => Text(host),
-                                        child: ShadButton.ghost(
-                                          size: ShadButtonSize.sm,
-                                          onPressed: _loading || _checkingHosts.contains(host)
-                                              ? null
-                                              : () => _checkHost(host),
-                                          child: _checkingHosts.contains(host)
-                                              ? const SizedBox(
-                                                  width: 12,
-                                                  height: 12,
-                                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                                )
-                                              : const Text('Check'),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      if (_hostStatus[host] != null)
-                                        ShadTooltip(
-                                          builder: (context) => Text(
-                                            _hostStatus[host] == 'Unreachable'
-                                                ? '$host did not respond to ssh-keyscan.'
-                                                : '$host publishes ${_hostStatus[host]} — one line per key algorithm (RSA, ED25519, ECDSA, etc.). This is what gets added to known_hosts.',
-                                          ),
-                                          child: ShadBadge(
-                                            child: Text(
-                                              _hostStatus[host]!,
-                                              style: const TextStyle(fontSize: 10),
-                                            ),
-                                          ),
-                                        ),
-                                      const SizedBox(width: 6),
-                                      ShadTooltip(
-                                        builder: (context) => Text(host),
-                                        child: ShadButton.ghost(
-                                          size: ShadButtonSize.sm,
-                                          onPressed: _loading
-                                              ? null
-                                              : () => _removeKnownHost(host),
-                                          child: const Text('Remove'),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
+                              for (final entry in _knownHosts)
+                                _buildHostRow(entry, theme),
+                            ],
+                          ),
+          ],
+        ),
+      ),
+    ],
+  );
     }
+  }

@@ -1333,13 +1333,13 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                         const SizedBox(width: 8),
                         ShadButton(
                           onPressed: adding || _hostsLoading ? null : _addKnownHost,
-                          child: adding
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
+                          leading: adding
+                              ? const SizedBox.square(
+                                  dimension: 14,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Text('Add'),
+                              : null,
+                          child: const Text('Add'),
                         ),
                       ],
                     ),

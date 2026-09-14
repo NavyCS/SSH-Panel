@@ -194,8 +194,10 @@ class SshConfigManager {
     // Reject whitespace and control characters.
     if (RegExp(r'[\s\x00-\x1f]').hasMatch(trimmed)) return false;
     // Reject shell metacharacters that could break out of ssh-keyscan.
-    const forbidden =
-        '<>&|;"\'\\$`!#?*~[]{}()';
+    const forbidden = <String>{
+      '<', '>', '&', '|', ';', '"', "'", '\\', '\$', '`',
+      '!', '#', '?', '*', '~', '[', ']', '{', '}', '(', ')',
+    };
     if (trimmed.split('').any((c) => forbidden.contains(c))) return false;
     // Each label must be 1-63 chars, total ≤ 253, no leading/trailing dot/dash.
     if (trimmed.length > 253) return false;

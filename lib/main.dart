@@ -281,90 +281,96 @@ class _ServiceTabState extends State<ServiceTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
 // ---- Status card ----
-          ShadCard(
-            title: Row(
-              children: [
-                const Text('Agent Status'),
-                const SizedBox(width: 8),
-                if (!_loading && _error == null)
-                  ShadBadge(
-                    child: Text(
-                      _status != null
-                          ? _statusLabel(_status!)
-                          : 'Unknown',
+          LayoutBuilder(
+            builder: (context, constraints) => ShadCard(
+              width: constraints.maxWidth,
+              title: Row(
+                children: [
+                  const Text('Agent Status'),
+                  const SizedBox(width: 8),
+                  if (!_loading && _error == null)
+                    ShadBadge(
+                      child: Text(
+                        _status != null
+                            ? _statusLabel(_status!)
+                            : 'Unknown',
+                      ),
                     ),
-                  ),
-              ],
-            ),
-            description: const Text('Current state of the ssh-agent service'),
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: _loading
-                  ? Row(
-                      children: [
-                        const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                        const SizedBox(width: 10),
-                        Text('Loading...', style: theme.textTheme.muted),
-                      ],
-                    )
-                  : _error != null
-                      ? ShadAlert.destructive(
-                          title: const Text('Error'),
-                          description: Text(_error!),
-                        )
-                      : Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            ShadButton(
-                              onPressed: _loading ? null : _startService,
-                              child: const Text('Start'),
-                            ),
-                            ShadButton.destructive(
-                              onPressed: _loading ? null : _stopService,
-                              child: const Text('Stop'),
-                            ),
-                            ShadButton.outline(
-                              onPressed: _loading ? null : _refreshStatus,
-                              child: const Text('Refresh'),
-                            ),
-                          ],
-                        ),
+                ],
+              ),
+              description: const Text('Current state of the ssh-agent service'),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: _loading
+                    ? Row(
+                        children: [
+                          const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 10),
+                          Text('Loading...', style: theme.textTheme.muted),
+                        ],
+                      )
+                    : _error != null
+                        ? ShadAlert.destructive(
+                            title: const Text('Error'),
+                            description: Text(_error!),
+                          )
+                        : Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              ShadButton(
+                                onPressed: _loading ? null : _startService,
+                                child: const Text('Start'),
+                              ),
+                              ShadButton.destructive(
+                                onPressed: _loading ? null : _stopService,
+                                child: const Text('Stop'),
+                              ),
+                              ShadButton.outline(
+                                onPressed: _loading ? null : _refreshStatus,
+                                child: const Text('Refresh'),
+                              ),
+                            ],
+                          ),
+              ),
             ),
           ),
 
           const SizedBox(height: 16),
 
           // ---- Startup type card ----
-          ShadCard(
-            title: const Text('Startup Type'),
-            description: const Text(
-              'Configure how the ssh-agent service starts with Windows',
-            ),
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child:               ShadSelect<StartupType>(
-                initialValue: _startupType,
-                options: StartupType.values.map((type) {
-                  final label =
-                      type.name[0].toUpperCase() + type.name.substring(1);
-                  return ShadOption<StartupType>(
-                    value: type,
-                    child: Text(label),
-                  );
-                }).toList(),
-                selectedOptionBuilder: (context, value) {
-                  return Text(
-                    value.name[0].toUpperCase() + value.name.substring(1),
-                  );
-                },
-                onChanged: (value) {
-                  if (value != null) _setStartupType(value);
-                },
+          LayoutBuilder(
+            builder: (context, constraints) => ShadCard(
+              width: constraints.maxWidth,
+              title: const Text('Startup Type'),
+              description: const Text(
+                'Configure how the ssh-agent service starts with Windows',
+              ),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: ShadSelect<StartupType>(
+                  initialValue: _startupType,
+                  options: StartupType.values.map((type) {
+                    final label =
+                        type.name[0].toUpperCase() + type.name.substring(1);
+                    return ShadOption<StartupType>(
+                      value: type,
+                      child: Text(label),
+                    );
+                  }).toList(),
+                  selectedOptionBuilder: (context, value) {
+                    return Text(
+                      value.name[0].toUpperCase() + value.name.substring(1),
+                    );
+                  },
+                  onChanged: (value) {
+                    if (value != null) _setStartupType(value);
+                  },
+                ),
               ),
             ),
           ),

@@ -937,10 +937,9 @@ void _openSshFolder() {
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
 
-    return SizedBox(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+return ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          children: [
           // ---- Error banner ----
           if (_error != null) ...[
             ShadAlert.destructive(
@@ -965,7 +964,6 @@ void _openSshFolder() {
             ),
             description: const Text('Contents of ~/.ssh/config'),
             footer: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
               children: [
                 ShadButton.outline(
                   onPressed: _loading ? null : _refresh,
@@ -992,7 +990,7 @@ void _openSshFolder() {
                   : ShadTextarea(
                       controller: _configController,
                       placeholder: const Text('No config file found'),
-                      minHeight: 160,
+                      minHeight: 200,
                     ),
             ),
           ),
@@ -1103,13 +1101,14 @@ void _openSshFolder() {
                                     ],
                                   ),
                                 ),
-                            ],
-                          ),
+),
+                  ],
+                ),
               ],
             ),
           ),
         ],
-      ),
-    );
+      );
+    }
   }
 }

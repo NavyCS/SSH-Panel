@@ -1,0 +1,101 @@
+/// OpenSSH presence detection for Windows.
+///
+/// Probes whether OpenSSH (the `ssh` command and related tooling) is installed
+/// on this machine using PowerShell. Two strategies are tried in order:
+///
+/// 1. `Get-WindowsCapability` — queries the Windows optional-feature store
+///    for the `OpenSSH.Client` or `OpenSSH.Server` capability.
+/// 2. `Get-Command ssh` — fast PATH-based fallback.
+///
+/// Neither invocation is fatal: if the shell itself cannot be launched, the
+/// result is [OpenSshStatus.absent].
+library;
+
+import 'dart:io';
+
+// ---------------------------------------------------------------------------
+// Result type
+// ---------------------------------------------------------------------------
+
+/// Whether OpenSSH appears to be installed.
+enum OpenSshStatus {
+  /// At least one OpenSSH capability or command was found.
+  present,
+
+  /// No OpenSSH artifacts were detected.
+  absent,
+}
+
+/// The outcome of an OpenSSH presence check.
+class OpenSshCheckResult {
+  /// Creates a check result.
+  const OpenSshCheckResult({required this.status, this.detail});
+
+  /// Whether OpenSSH is installed.
+  final OpenSshStatus status;
+
+  /// Optional human-readable note (e.g. capability name or error summary).
+  final String? detail;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Detects whether OpenSSH is installed on this Windows machine.
+///
+/// Returns [OpenSshCheckResult] with status [OpenSshStatus.present] or
+/// [OpenSshStatus.absent].  Never throws.
+Future<OpenSshCheckResult> sshCheck() async {
+  // Strategy 1 — Windows capability store (most authoritative).
+  try {
+    final capResult = await Process.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        // Try both Client and Server capabilities; either counts.
+        'Get-WindowsCapability -Online '
+            '| where Name -like "OpenSSH*" '
+            '| Select-Object -ExpandProperty Name',
+      ],
+    );
+    if (capResult.exitCode == 0) {
+      final stdout = capResult.stdout.toString().trim();
+      if (stdout.isNotEmpty) {
+        return OpenSshCheckResult(
+          status: OpenSshStatus.present,
+          detail: 'capability: $stdout',
+        );
+      }
+    }
+  } catch (_) {
+    // PowerShell itself was unreachable — fall through to strategy 2.
+  }
+
+  // Strategy 2 — PATH lookup via Get-Command.
+  try {
+    final cmdResult = await Process.run(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        'Get-Command ssh -ErrorAction SilentlyContinue '
+            '| Select-Object -ExpandProperty Source',
+      ],
+    );
+    if (cmdResult.exitCode == 0) {
+      final stdout = cmdResult.stdout.toString().trim();
+      if (stdout.isNotEmpty) {
+        return OpenSshCheckResult(
+          status: OpenSshStatus.present,
+          detail: 'path: $stdout',
+        );
+      }
+    }
+  } catch (_) {
+    // Fall through.
+  }
+
+  return const OpenSshCheckResult(status: OpenSshStatus.absent);
+}

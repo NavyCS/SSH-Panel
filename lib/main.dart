@@ -766,6 +766,7 @@ class DomainsTab extends StatefulWidget {
 class _DomainsTabState extends State<DomainsTab> {
   final _configManager = SshConfigManager();
   late TextEditingController _configController;
+  late final TextEditingController _hostController;
   List<String> _knownHosts = [];
   bool _loading = false;
   String? _error;
@@ -774,12 +775,14 @@ class _DomainsTabState extends State<DomainsTab> {
   void initState() {
     super.initState();
     _configController = TextEditingController();
+    _hostController = TextEditingController();
     _refresh();
   }
 
   @override
   void dispose() {
     _configController.dispose();
+    _hostController.dispose();
     super.dispose();
   }
 
@@ -841,6 +844,55 @@ void _openSshFolder() {
     final dir = _configManager.sshDirectory;
     if (dir.isEmpty) return;
     Process.run('explorer', [dir], runInShell: false);
+  }
+
+  Future<void> _addKnownHost() async {
+    final host = _hostController.text.trim();
+    if (host.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await _configManager.addKnownHost(host);
+      _hostController.clear();
+      await _refresh();
+    } on SshConfigException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _removeKnownHost(String host) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      _configManager.removeKnownHost(host);
+      await _refresh();
+    } on SshConfigException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
   @override
@@ -911,48 +963,80 @@ void _openSshFolder() {
 
           // ---- Known hosts card ----
           ShadCard(
-            title: const Text('Known Hosts'),
+            title: Row(
+              children: [
+                const Text('Known Hosts'),
+                const SizedBox(width: 8),
+                ShadButton.ghost(
+                  size: ShadButtonSize.sm,
+                  onPressed: _loading ? null : _addKnownHost,
+                  child: const Icon(LucideIcons.plus, size: 14),
+                ),
+              ],
+            ),
             description: Text('${_knownHosts.length} host(s) in known_hosts'),
-            child: _loading
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : _knownHosts.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          'No known hosts found',
-                          style: theme.textTheme.muted,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                  child: ShadInput(
+                    controller: _hostController,
+                    placeholder: const Text('example.com'),
+                    onSubmitted: (_) => _addKnownHost(),
+                  ),
+                ),
+                _loading
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : Column(
-                        children: [
-                          for (final host in _knownHosts)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    LucideIcons.globe,
-                                    size: 14,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      host,
-                                      style: theme.textTheme.small,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                    : _knownHosts.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              'No known hosts found',
+                              style: theme.textTheme.muted,
                             ),
-                        ],
-                      ),
+                          )
+                        : Column(
+                            children: [
+                              for (final host in _knownHosts)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        LucideIcons.globe,
+                                        size: 14,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          host,
+                                          style: theme.textTheme.small,
+                                        ),
+                                      ),
+                                      ShadTooltip(
+                                        builder: (context) => Text(host),
+                                        child: ShadButton.ghost(
+                                          size: ShadButtonSize.sm,
+                                          onPressed: _loading
+                                              ? null
+                                              : () => _removeKnownHost(host),
+                                          child: const Text('Remove'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+              ],
+            ),
           ),
         ],
       ),

@@ -14,16 +14,22 @@ import 'dart:io';
 // ---------------------------------------------------------------------------
 
 /// Error codes produced by [SshConfigManager].
-enum SshConfigErrorCode {
-  /// The `USERPROFILE` environment variable is not set.
-  userProfileNotSet,
+  enum SshConfigErrorCode {
+    /// The `USERPROFILE` environment variable is not set.
+    userProfileNotSet,
 
-  /// Could not read the file (permission denied, I/O error, etc.).
-  readFailed,
+    /// Could not read the file (permission denied, I/O error, etc.).
+    readFailed,
 
-  /// Could not write the file (permission denied, I/O error, etc.).
-  writeFailed,
-}
+    /// Could not write the file (permission denied, I/O error, etc.).
+    writeFailed,
+
+    /// `ssh-keyscan` was not found or failed.
+    keyscanFailed,
+
+    /// The host was not found in known_hosts.
+    hostNotFound,
+  }
 
 /// A typed exception thrown by [SshConfigManager] methods.  The [code]
 /// identifies the category; [message] is a human-readable explanation.
@@ -163,6 +169,89 @@ class SshConfigManager {
       throw SshConfigException(
         SshConfigErrorCode.readFailed,
         'Failed to read ~/.ssh/known_hosts.',
+        rawDetail: e.message,
+      );
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // addKnownHost
+  // -----------------------------------------------------------------------
+
+  /// Adds a host to `~/.ssh/known_hosts` by running `ssh-keyscan`.
+  ///
+  /// Fetches the host's public key(s) and appends the result to
+  /// `known_hosts`. If the host already has an entry it is replaced (the
+  /// old line is removed first).
+  ///
+  /// Throws [SshConfigException] if `ssh-keyscan` is unavailable or the
+  /// host cannot be resolved.
+  Future<void> addKnownHost(String host) async {
+    final result = await Process.run(
+      'ssh-keyscan',
+      [host],
+      runInShell: false,
+    );
+
+    if (result.exitCode != 0) {
+      throw SshConfigException(
+        SshConfigErrorCode.keyscanFailed,
+        'ssh-keyscan failed for $host (exit code ${result.exitCode}).',
+        rawDetail: '${result.stdout}\n${result.stderr}',
+      );
+    }
+
+    final output = result.stdout.toString().trim();
+    if (output.isEmpty) {
+      throw SshConfigException(
+        SshConfigErrorCode.keyscanFailed,
+        'ssh-keyscan returned no keys for $host.',
+      );
+    }
+
+    // Remove any existing entries for this host before appending.
+    removeKnownHost(host);
+
+    final file = File(_knownHostsPath);
+    try {
+      if (!file.parent.existsSync()) {
+        file.parent.createSync(recursive: true);
+      }
+      file.writeAsStringSync('$output\n', mode: FileMode.append);
+    } on FileSystemException catch (e) {
+      throw SshConfigException(
+        SshConfigErrorCode.writeFailed,
+        'Failed to write ~/.ssh/known_hosts.',
+        rawDetail: e.message,
+      );
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // removeKnownHost
+  // -----------------------------------------------------------------------
+
+  /// Removes all entries for [host] from `~/.ssh/known_hosts`.
+  ///
+  /// Does nothing if the file does not exist or the host is not present.
+  /// Throws [SshConfigException] only on I/O errors.
+  void removeKnownHost(String host) {
+    final file = File(_knownHostsPath);
+    if (!file.existsSync()) return;
+
+    final lines = file.readAsLinesSync();
+    final filtered = lines
+        .where((line) => line.trim().isEmpty ||
+            line.trim().startsWith('#') ||
+            line.split(RegExp(r'\s+')).first != host)
+        .toList();
+
+    try {
+      file.writeAsStringSync(filtered.join('\n'));
+    } on FileSystemException catch (e) {
+      throw SshConfigException(
+        SshConfigErrorCode.writeFailed,
+        'Failed to write ~/.ssh/known_hosts.',
         rawDetail: e.message,
       );
     }

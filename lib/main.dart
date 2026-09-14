@@ -767,11 +767,14 @@ class _DomainsTabState extends State<DomainsTab> {
   final _configManager = SshConfigManager();
   late TextEditingController _configController;
   late final TextEditingController _hostController;
-  List<Map<String, String>> _knownHosts = [];
-  bool _loading = false;
-  String? _error;
-  final Map<String, String?> _hostStatus = {};
-  final Set<String> _checkingHosts = {};
+List<Map<String, String>> _knownHosts = [];
+    bool _loading = false;
+    bool _editing = false;
+    bool _hostsLoading = false;
+    final ValueNotifier<bool> _adding = ValueNotifier<bool>(false);
+    String? _error;
+    final Map<String, String?> _hostStatus = {};
+    final Set<String> _checkingHosts = {};
 
   @override
   void initState() {
@@ -817,6 +820,35 @@ class _DomainsTabState extends State<DomainsTab> {
     }
   }
 
+  Future<void> _refreshHosts() async {
+    setState(() {
+      _hostsLoading = true;
+      _error = null;
+    });
+    try {
+      final hosts = _configManager.getKnownHosts();
+      if (!mounted) return;
+      final currentHosts = hosts.map((h) => h['host']!).toSet();
+      _hostStatus.removeWhere((key, _) => !currentHosts.contains(key));
+      setState(() {
+        _knownHosts = hosts;
+        _hostsLoading = false;
+      });
+    } on SshConfigException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _hostsLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _hostsLoading = false;
+      });
+    }
+  }
+
   void _saveConfig() {
     setState(() {
       _loading = true;
@@ -826,6 +858,7 @@ class _DomainsTabState extends State<DomainsTab> {
       _configManager.writeConfig(_configController.text);
       setState(() {
         _loading = false;
+        _editing = false;
       });
     } on SshConfigException catch (e) {
       if (!mounted) return;
@@ -846,6 +879,20 @@ void _openSshFolder() {
     final dir = _configManager.sshDirectory;
     if (dir.isEmpty) return;
     Process.run('explorer', [dir], runInShell: false);
+  }
+
+  void _openKnownHostsFile() {
+    final path = _configManager.knownHostsPath;
+    if (path.isEmpty) return;
+    Process.run('explorer', ['/select,', path], runInShell: false);
+  }
+
+  String _shortPath(String path) {
+    final home = _configManager.sshDirectory;
+    if (home.isNotEmpty && path.startsWith(home)) {
+      return '~${path.substring(home.length)}';
+    }
+    return path;
   }
 
   Future<void> _removeKnownHost(String host, String keyType) async {
@@ -871,23 +918,23 @@ void _openSshFolder() {
     if (confirmed != true) return;
 
     setState(() {
-      _loading = true;
+      _hostsLoading = true;
       _error = null;
     });
     try {
       _configManager.removeKnownHost(host, keyType);
-      await _refresh();
+      await _refreshHosts();
     } on SshConfigException catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
+        _hostsLoading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
+        _hostsLoading = false;
       });
     }
   }
@@ -938,10 +985,10 @@ Future<void> _addKnownHost() async {
       });
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    _adding.value = true;
+    _error = null;
+    if (mounted) setState(() {});
+
     List<String> keyLines;
     try {
       keyLines = await _configManager.scanHostKeys(host);
@@ -949,19 +996,19 @@ Future<void> _addKnownHost() async {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
+        _adding.value = false;
       });
       return;
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
+        _adding.value = false;
       });
       return;
     }
     if (!mounted) return;
-    setState(() => _loading = false);
+    _adding.value = false;
 
     // Parse each line into (keyType, fullLine) pairs.
     final entries = <Map<String, String>>[];
@@ -1052,24 +1099,22 @@ Future<void> _addKnownHost() async {
         .toList();
 
     setState(() {
-      _loading = true;
+      _hostsLoading = true;
       _error = null;
     });
     try {
       await _configManager.writeKnownHostKeys(host, chosenLines);
       _hostController.clear();
-      await _refresh();
+      await _refreshHosts();
     } on SshConfigException catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
-        _loading = false;
       });
     }
   }
@@ -1109,7 +1154,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
             builder: (context) => Text(host),
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
-              onPressed: _loading || _checkingHosts.contains(host)
+              onPressed: _hostsLoading || _checkingHosts.contains(host)
                   ? null
                   : () => _checkHost(host),
               child: _checkingHosts.contains(host)
@@ -1147,7 +1192,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
             builder: (context) => Text(host),
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
-              onPressed: _loading
+              onPressed: _hostsLoading
                   ? null
                   : () => _removeKnownHost(host, keyType),
               child: const Text('Remove'),
@@ -1195,10 +1240,27 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                   child: const Text('Reload'),
                 ),
                 const SizedBox(width: 8),
-                ShadButton(
-                  onPressed: _loading ? null : _saveConfig,
-                  child: const Text('Save'),
-                ),
+                if (!_editing)
+                  ShadButton.outline(
+                    onPressed: _loading ? null : () => setState(() => _editing = true),
+                    child: const Text('Edit'),
+                  ),
+                if (_editing) ...[
+                  ShadButton(
+                    onPressed: _loading ? null : _saveConfig,
+                    child: const Text('Save'),
+                  ),
+                  const SizedBox(width: 8),
+                  ShadButton.outline(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            _configController.text = _configManager.readConfig();
+                            setState(() => _editing = false);
+                          },
+                    child: const Text('Cancel'),
+                  ),
+                ],
               ],
             ),
             child: Padding(
@@ -1215,7 +1277,9 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                   : ShadTextarea(
                       controller: _configController,
                       placeholder: const Text('No config file found'),
-                      minHeight: 200,
+                      minHeight: 120,
+                      readOnly: !_editing,
+                      resizable: false,
                     ),
             ),
           ),
@@ -1230,23 +1294,58 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                 const SizedBox(width: 8),
                 ShadButton.ghost(
                   size: ShadButtonSize.sm,
-                  onPressed: _loading ? null : _addKnownHost,
-                  child: const Icon(LucideIcons.plus, size: 14),
+                  onPressed: _openKnownHostsFile,
+                  child: const Icon(LucideIcons.folderOpen, size: 14),
                 ),
               ],
             ),
-            description: Text('${_knownHosts.length} host(s) in known_hosts'),
+            description: Text(
+              '${_knownHosts.length} host(s) in ${_shortPath(_configManager.knownHostsPath)}',
+            ),
             child: Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-                  child: ShadInput(
-                    controller: _hostController,
-                    placeholder: const Text('example.com'),
-                    onSubmitted: (_) => _addKnownHost(),
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _adding,
+                    builder: (context, adding, _) => Row(
+                      children: [
+                        Expanded(
+                          child: ListenableBuilder(
+                            listenable: _hostController,
+                            builder: (context, _) => ShadInput(
+                              controller: _hostController,
+                              placeholder: const Text('example.com'),
+                              onSubmitted: adding ? null : (_) => _addKnownHost(),
+                              enabled: !adding,
+                              trailing: _hostController.text.isNotEmpty && !adding
+                                  ? ShadButton.ghost(
+                                      size: ShadButtonSize.sm,
+                                      onPressed: () {
+                                        _hostController.clear();
+                                      },
+                                      child: const Icon(LucideIcons.x, size: 14),
+                                    )
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ShadButton(
+                          onPressed: adding || _hostsLoading ? null : _addKnownHost,
+                          child: adding
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Add'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                _loading
+                _hostsLoading
                     ? const Padding(
                         padding: EdgeInsets.all(12),
                         child: SizedBox(

@@ -85,6 +85,9 @@ class SshConfigManager {
   String get _configPath => '${_sshDir()}\\config';
 
   /// Returns the absolute path to `~/.ssh/known_hosts`.
+  String get knownHostsPath => _knownHostsPath;
+
+  /// Returns the absolute path to `~/.ssh/known_hosts`.
   String get _knownHostsPath => '${_sshDir()}\\known_hosts';
 
   // -----------------------------------------------------------------------

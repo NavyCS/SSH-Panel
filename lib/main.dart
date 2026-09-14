@@ -1334,9 +1334,12 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                         ShadButton(
                           onPressed: adding || _hostsLoading ? null : _addKnownHost,
                           leading: adding
-                              ? const SizedBox.square(
+                              ? SizedBox.square(
                                   dimension: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: ShadTheme.of(context).colorScheme.primaryForeground,
+                                  ),
                                 )
                               : null,
                           child: const Text('Add'),

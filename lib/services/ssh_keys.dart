@@ -96,6 +96,11 @@ class SshKeyManager {
   // -----------------------------------------------------------------------
 
   /// Resolves `~/.ssh` using `USERPROFILE`.
+  ///
+  /// Returns an empty string if `USERPROFILE` is not set.
+  String get sshDirectory => _sshDir;
+
+  /// Resolves `~/.ssh` using `USERPROFILE`.
   String get _sshDir {
     final userProfile = Platform.environment['USERPROFILE'];
     if (userProfile == null || userProfile.isEmpty) {

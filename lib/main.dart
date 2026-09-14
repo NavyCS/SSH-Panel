@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -569,6 +571,12 @@ class _KeysTabState extends State<KeysTab> {
     return parts.isNotEmpty ? parts.last : path;
   }
 
+  void _openSshFolder() {
+    final dir = _keyManager.sshDirectory;
+    if (dir.isEmpty) return;
+    Process.run('explorer', [dir], runInShell: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -610,7 +618,17 @@ class _KeysTabState extends State<KeysTab> {
 
           // ---- Key files card ----
           ShadCard(
-            title: const Text('Key Files'),
+            title: Row(
+              children: [
+                const Text('Key Files'),
+                const SizedBox(width: 8),
+                ShadButton.ghost(
+                  size: ShadButtonSize.sm,
+                  onPressed: _openSshFolder,
+                  child: const Icon(LucideIcons.folderOpen, size: 14),
+                ),
+              ],
+            ),
             description: Text('${_keyFiles.length} file(s) in ~/.ssh'),
             child: _loading
                 ? const Padding(
@@ -806,11 +824,17 @@ class _DomainsTabState extends State<DomainsTab> {
     }
   }
 
+void _openSshFolder() {
+    final dir = _configManager.sshDirectory;
+    if (dir.isEmpty) return;
+    Process.run('explorer', [dir], runInShell: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
 
-    return SingleChildScrollView(
+    return SizedBox(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -825,7 +849,17 @@ class _DomainsTabState extends State<DomainsTab> {
 
           // ---- Config card ----
           ShadCard(
-            title: const Text('SSH Config'),
+            title: Row(
+              children: [
+                const Text('SSH Config'),
+                const SizedBox(width: 8),
+                ShadButton.ghost(
+                  size: ShadButtonSize.sm,
+                  onPressed: _openSshFolder,
+                  child: const Icon(LucideIcons.folderOpen, size: 14),
+                ),
+              ],
+            ),
             description: const Text('Contents of ~/.ssh/config'),
             footer: Row(
               mainAxisAlignment: MainAxisAlignment.end,

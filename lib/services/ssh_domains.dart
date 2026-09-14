@@ -56,6 +56,11 @@ class SshConfigManager {
   /// Returns the absolute path to the `~/.ssh` directory.
   ///
   /// Throws [SshConfigException] if `USERPROFILE` is not set.
+  String get sshDirectory => _sshDir();
+
+  /// Returns the absolute path to the `~/.ssh` directory.
+  ///
+  /// Throws [SshConfigException] if `USERPROFILE` is not set.
   String _sshDir() {
     final userProfile = Platform.environment['USERPROFILE'];
     if (userProfile == null || userProfile.isEmpty) {

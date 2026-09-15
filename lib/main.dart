@@ -620,6 +620,8 @@ class _KeysTabState extends State<KeysTab> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const Text('Algorithm', style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
               ShadSelect<KeyAlgorithm>(
                 initialValue: algorithm,
                 options: KeyAlgorithm.values.map((algo) {
@@ -638,11 +640,15 @@ class _KeysTabState extends State<KeysTab> {
                 },
               ),
               const SizedBox(height: 12),
+              const Text('Key name', style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
               ShadInput(
                 controller: nameController,
-                placeholder: Text('Key name (${algorithm.defaultName})'),
+                placeholder: const Text('Key name (ex. example, id_ed25519)'),
               ),
               const SizedBox(height: 12),
+              const Text('Comment', style: TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
               ShadInput(
                 controller: commentController,
                 placeholder: const Text('Comment (optional)'),

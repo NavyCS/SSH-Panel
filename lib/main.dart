@@ -454,7 +454,7 @@ class _KeysTabState extends State<KeysTab> {
       if (await _keyManager.hasPassphrase(path)) {
         // Keep prompting until the correct passphrase is entered or user cancels.
         while (true) {
-          final passphrase = await _promptPassphrase(path);
+          final passphrase = await _promptPassphrase();
           if (passphrase == null) {
             if (!mounted) return;
             setState(() {
@@ -500,7 +500,7 @@ class _KeysTabState extends State<KeysTab> {
   }
 
   /// Shows a dialog requesting the passphrase for a protected key.
-  Future<String?> _promptPassphrase(String path) async {
+  Future<String?> _promptPassphrase() async {
     final controller = TextEditingController();
     bool obscure = true;
     final confirmed = await showDialog<bool>(
@@ -599,39 +599,56 @@ class _KeysTabState extends State<KeysTab> {
   Future<void> _generateKey() async {
     final nameController = TextEditingController(text: 'id_ed25519');
     final commentController = TextEditingController();
+    bool passphraseProtected = false;
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => ShadDialog(
-        title: const Text('Generate Key'),
-        actions: [
-          ShadButton.ghost(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          ShadButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Generate'),
-          ),
-        ],
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ShadInput(
-              controller: nameController,
-              placeholder: const Text('Key name'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => ShadDialog(
+          title: const Text('Generate Key'),
+          actions: [
+            ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
             ),
-            const SizedBox(height: 12),
-            ShadInput(
-              controller: commentController,
-              placeholder: const Text('Comment (optional)'),
+            ShadButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Generate'),
             ),
           ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ShadInput(
+                controller: nameController,
+                placeholder: const Text('Key name'),
+              ),
+              const SizedBox(height: 12),
+              ShadInput(
+                controller: commentController,
+                placeholder: const Text('Comment (optional)'),
+              ),
+              const SizedBox(height: 12),
+              ShadCheckbox(
+                value: passphraseProtected,
+                onChanged: (value) {
+                  setStateDialog(() => passphraseProtected = value);
+                },
+                label: const Text('Protect with passphrase'),
+              ),
+            ],
+          ),
         ),
       ),
     );
 
     if (confirmed != true) return;
+
+    String? passphrase;
+    if (passphraseProtected) {
+      passphrase = await _promptPassphrase();
+      if (passphrase == null) return;
+    }
 
     setState(() {
       _loading = true;
@@ -641,6 +658,7 @@ class _KeysTabState extends State<KeysTab> {
       await _keyManager.generateKey(
         name: nameController.text,
         comment: commentController.text.isEmpty ? null : commentController.text,
+        passphrase: passphrase,
       );
       await _refresh();
     } on SshKeyException catch (e) {

@@ -22,6 +22,49 @@ import 'dart:convert';
 import 'dart:io';
 
 // ---------------------------------------------------------------------------
+// Key algorithm types
+// ---------------------------------------------------------------------------
+
+/// Supported SSH key algorithm types for generation.
+enum KeyAlgorithm {
+  /// Ed25519 (preferred, introduced in OpenSSH 6.5).
+  ed25519('ed25519', 'id_ed25519'),
+
+  /// Ed25519-sk (requires OpenSSH 8.2+, hardware security key).
+  ed25519Sk('ed25519-sk', 'id_ed25519_sk'),
+
+  /// ECDSA-sk (requires OpenSSH 8.2+, hardware security key).
+  ecdsaSk('ecdsa-sk', 'id_ecdsa_sk'),
+
+  /// RSA with 4096-bit key size (recommended by GitLab).
+  rsa('rsa', 'id_rsa'),
+
+  /// ECDSA (NIST P-256 curve).
+  ecdsa('ecdsa', 'id_ecdsa'),
+
+  /// DSA (deprecated, not recommended).
+  dsa('dsa', 'id_dsa');
+
+  const KeyAlgorithm(this.type, this.defaultName);
+
+  /// The ssh-keygen `-t` argument value.
+  final String type;
+
+  /// The default filename (e.g. `id_ed25519`) when no custom name is given.
+  final String defaultName;
+
+  /// Human-readable label for the UI.
+  String get label => switch (this) {
+        ed25519 => 'ED25519 (recommended)',
+        ed25519Sk => 'ED25519-SK (hardware key)',
+        ecdsaSk => 'ECDSA-SK (hardware key)',
+        rsa => 'RSA (4096-bit)',
+        ecdsa => 'ECDSA',
+        dsa => 'DSA (deprecated)',
+      };
+}
+
+// ---------------------------------------------------------------------------
 // Typed exception
 // ---------------------------------------------------------------------------
 
@@ -417,10 +460,13 @@ class SshKeyManager {
   // generateKey
   // -----------------------------------------------------------------------
 
-  /// Generates a new ed25519 SSH key pair.
+  /// Generates a new SSH key pair.
   ///
-  /// * [name] — the base filename (e.g. `id_ed25519`).  The private key is
-  ///   written to `~/.ssh/<name>`; the public key to `~/.ssh/<name>.pub`.
+  /// * [name] — the base filename (e.g. `id_ed25519`).  If empty or null,
+  ///   the algorithm's default name is used (e.g. `id_ed25519` for ed25519).
+  ///   The private key is written to `~/.ssh/<name>`; the public key to
+  ///   `~/.ssh/<name>.pub`.
+  /// * [algorithm] — the key type to generate (defaults to [KeyAlgorithm.ed25519]).
   /// * [passphrase] — if non-null the private key is encrypted with this
   ///   passphrase.  If null the key has no passphrase.
   /// * [comment] — optional comment embedded in the public key (typically an
@@ -436,6 +482,7 @@ class SshKeyManager {
   /// target private-key path already exists.
   Future<void> generateKey({
     required String name,
+    KeyAlgorithm algorithm = KeyAlgorithm.ed25519,
     String? passphrase,
     String? comment,
   }) async {
@@ -453,7 +500,10 @@ class SshKeyManager {
       await directory.create(recursive: true);
     }
 
-    final keyPath = '$dir${Platform.pathSeparator}$name';
+    // Use algorithm default name if name is empty.
+    final effectiveName = name.trim().isEmpty ? algorithm.defaultName : name.trim();
+
+    final keyPath = '$dir${Platform.pathSeparator}$effectiveName';
     final pubPath = '$keyPath.pub';
 
     // Check for existing file *before* invoking ssh-keygen.
@@ -469,13 +519,18 @@ class SshKeyManager {
     final args = <String>[
       'ssh-keygen',
       '-t',
-      'ed25519',
+      algorithm.type,
       '-f',
       keyPath,
       // -P "" means no passphrase (different from -N "" which is broken).
       '-P',
       passphrase ?? '',
     ];
+
+    // RSA requires explicit bit size (GitLab recommends 4096).
+    if (algorithm == KeyAlgorithm.rsa) {
+      args.addAll(['-b', '4096']);
+    }
 
     if (comment != null && comment.isNotEmpty) {
       args

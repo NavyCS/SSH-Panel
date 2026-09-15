@@ -597,9 +597,10 @@ class _KeysTabState extends State<KeysTab> {
   }
 
   Future<void> _generateKey() async {
-    final nameController = TextEditingController(text: 'id_ed25519');
+    final nameController = TextEditingController();
     final commentController = TextEditingController();
     bool passphraseProtected = false;
+    KeyAlgorithm algorithm = KeyAlgorithm.ed25519;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -619,9 +620,27 @@ class _KeysTabState extends State<KeysTab> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ShadSelect<KeyAlgorithm>(
+                initialValue: algorithm,
+                options: KeyAlgorithm.values.map((algo) {
+                  return ShadOption<KeyAlgorithm>(
+                    value: algo,
+                    child: Text(algo.label),
+                  );
+                }).toList(),
+                selectedOptionBuilder: (context, value) {
+                  return Text(value.label);
+                },
+                onChanged: (value) {
+                  if (value != null) {
+                    setStateDialog(() => algorithm = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
               ShadInput(
                 controller: nameController,
-                placeholder: const Text('Key name'),
+                placeholder: Text('Key name (${algorithm.defaultName})'),
               ),
               const SizedBox(height: 12),
               ShadInput(
@@ -644,6 +663,10 @@ class _KeysTabState extends State<KeysTab> {
 
     if (confirmed != true) return;
 
+    final name = nameController.text.trim();
+    // Use algorithm default name if empty.
+    final effectiveName = name.isEmpty ? algorithm.defaultName : name;
+
     String? passphrase;
     if (passphraseProtected) {
       passphrase = await _promptPassphrase();
@@ -656,17 +679,76 @@ class _KeysTabState extends State<KeysTab> {
     });
     try {
       await _keyManager.generateKey(
-        name: nameController.text,
+        name: effectiveName,
+        algorithm: algorithm,
         comment: commentController.text.isEmpty ? null : commentController.text,
         passphrase: passphrase,
       );
       await _refresh();
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      // If key file already exists, ask if user wants to replace it.
+      if (e.code == SshKeyErrorCode.fileExists) {
+        final replace = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => ShadDialog(
+            title: const Text('Key already exists'),
+            description: const Text(
+              'A key with this name already exists. Do you want to '
+              'replace it?',
+            ),
+            actions: [
+              ShadButton.ghost(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ShadButton.destructive(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Replace'),
+              ),
+            ],
+          ),
+        );
+        if (replace != true || !mounted) return;
+        // Remove existing files and try again.
+        final dir = _keyManager.sshDirectory;
+        final keyPath = '$dir${Platform.pathSeparator}$effectiveName';
+        final pubPath = '$keyPath.pub';
+        try {
+          final f1 = File(keyPath);
+          if (await f1.exists()) await f1.delete();
+          final f2 = File(pubPath);
+          if (await f2.exists()) await f2.delete();
+        } catch (_) {}
+        try {
+          await _keyManager.generateKey(
+            name: effectiveName,
+            algorithm: algorithm,
+            comment: commentController.text.isEmpty
+                ? null
+                : commentController.text,
+            passphrase: passphrase,
+          );
+          await _refresh();
+        } on SshKeyException catch (e2) {
+          if (!mounted) return;
+          setState(() {
+            _error = e2.toString();
+            _loading = false;
+          });
+        } catch (e2) {
+          if (!mounted) return;
+          setState(() {
+            _error = e2.toString();
+            _loading = false;
+          });
+        }
+      } else {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {

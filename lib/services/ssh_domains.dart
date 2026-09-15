@@ -328,35 +328,6 @@ class SshConfigManager {
     }
   }
 
-  /// Internal helper: removes **all** entries whose host field matches
-  /// [host], regardless of key type.  Used by [addKnownHost] to replace
-  /// the full set of keys for a host.
-  void _removeAllHostEntries(String host) {
-    final file = File(_knownHostsPath);
-    if (!file.existsSync()) return;
-
-    final lines = file.readAsLinesSync();
-    final filtered = lines
-        .where((line) {
-          final trimmed = line.trim();
-          if (trimmed.isEmpty || trimmed.startsWith('#')) return true;
-          final tokens = trimmed.split(RegExp(r'\s+'));
-          final lineHost = tokens.isNotEmpty ? tokens[0].split(',').first : '';
-          return lineHost != host;
-        })
-        .toList();
-
-    try {
-      file.writeAsStringSync(filtered.join('\n'));
-    } on FileSystemException catch (e) {
-      throw SshConfigException(
-        SshConfigErrorCode.writeFailed,
-        'Failed to write ~/.ssh/known_hosts.',
-        rawDetail: e.message,
-      );
-    }
-  }
-
   // -----------------------------------------------------------------------
   // removeKnownHost
   // -----------------------------------------------------------------------

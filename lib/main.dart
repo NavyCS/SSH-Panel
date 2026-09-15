@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -412,12 +413,21 @@ class _KeysTabState extends State<KeysTab> {
       _error = null;
     });
     try {
-      final keyFiles = await _keyManager.listKeyFiles();
-      final loadedKeys = await _keyManager.listLoadedKeys();
+      final keyFiles = await _keyManager.listKeyFiles()
+          .timeout(const Duration(seconds: 30));
+      final loadedKeys = await _keyManager.listLoadedKeys()
+          .timeout(const Duration(seconds: 30));
       if (!mounted) return;
       setState(() {
         _keyFiles = keyFiles;
         _loadedKeys = loadedKeys;
+        _loading = false;
+      });
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error =
+            'Refresh timed out — the ssh-agent may be unresponsive.';
         _loading = false;
       });
     } on SshKeyException catch (e) {
@@ -441,14 +451,45 @@ class _KeysTabState extends State<KeysTab> {
       _error = null;
     });
     try {
-      await _keyManager.addKey(path);
-      await _refresh();
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (await _keyManager.hasPassphrase(path)) {
+        // Keep prompting until the correct passphrase is entered or user cancels.
+        while (true) {
+          final passphrase = await _promptPassphrase(path);
+          if (passphrase == null) {
+            if (!mounted) return;
+            setState(() {
+              _loading = false;
+              _error = null;
+            });
+            return;
+          }
+          try {
+            await _keyManager.addKey(path, passphrase: passphrase);
+            if (!mounted) return;
+            await _refresh();
+            break; // Success — exit the loop.
+          } on SshKeyException catch (e) {
+            if (!mounted) return;
+            if (e.code == SshKeyErrorCode.wrongPassphrase) {
+              setState(() {
+                _error = 'The passphrase is incorrect. Try again.';
+                _loading = false;
+              });
+              // Loop back to re-prompt.
+              continue;
+            }
+            // Some other error — show it and stop.
+            setState(() {
+              _error = e.toString();
+              _loading = false;
+            });
+            break;
+          }
+        }
+      } else {
+        await _keyManager.addKey(path);
+        await _refresh();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -456,6 +497,57 @@ class _KeysTabState extends State<KeysTab> {
         _loading = false;
       });
     }
+  }
+
+  /// Shows a dialog requesting the passphrase for a protected key.
+  Future<String?> _promptPassphrase(String path) async {
+    final controller = TextEditingController();
+    bool obscure = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => ShadDialog(
+          title: const Text('Passphrase required'),
+          description: const Text(
+            'This key is protected by a passphrase.',
+            style: TextStyle(fontSize: 14),
+          ),
+          child: ShadInput(
+            controller: controller,
+            obscureText: obscure,
+            placeholder: const Text('Enter passphrase'),
+            onSubmitted: (_) => Navigator.of(ctx).pop(true),
+            trailing: SizedBox.square(
+              dimension: 24,
+              child: OverflowBox(
+                maxWidth: 28,
+                maxHeight: 28,
+                child: ShadIconButton(
+                  iconSize: 20,
+                  padding: EdgeInsets.all(2),
+                  icon: Icon(obscure ? LucideIcons.eyeOff : LucideIcons.eye),
+                  onPressed: () {
+                    setStateDialog(() => obscure = !obscure);
+                  },
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ShadButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Load'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return null;
+    return controller.text;
   }
 
   Future<void> _removeKey(String path) async {
@@ -599,14 +691,18 @@ class _KeysTabState extends State<KeysTab> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              ShadButton(
-                onPressed: _loading ? null : _generateKey,
-                child: const Text('Generate'),
-              ),
-              ShadButton.ghost(
-                onPressed: _loading ? null : _refresh,
-                child: const Icon(LucideIcons.refreshCw, size: 16),
-              ),
+               ShadButton(
+                 onPressed: _loading ? null : _generateKey,
+                 child: const Text('Generate'),
+               ),
+               ShadButton.ghost(
+                 onPressed: _loading ? null : _refresh,
+                 child: const Icon(LucideIcons.refreshCw, size: 16),
+               ),
+               ShadButton.outline(
+                 onPressed: _loading ? null : _removeAll,
+                 child: const Text('Unload All'),
+               ),
             ],
           ),
 

@@ -17,6 +17,8 @@
 ///   is never interpolated into a shell string.
 library;
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,12 @@ enum SshKeyErrorCode {
 
   /// The agent returned an unexpected or unparseable output.
   unexpectedOutput,
+
+  /// A command timed out waiting for a response.
+  timeout,
+
+  /// The passphrase provided is incorrect for the key.
+  wrongPassphrase,
 }
 
 /// A typed exception thrown by [SshKeyManager] methods.
@@ -109,37 +117,61 @@ class SshKeyManager {
     return '$userProfile\\.ssh';
   }
 
-  /// Runs a process and throws [SshKeyException] if the binary is missing.
-  Future<ProcessResult> _runOrThrow(
+  /// Runs a process with a timeout and throws [SshKeyException] if the
+  /// binary is missing, the command exceeds [timeout] (default 30 s),
+  /// or the process cannot be launched. The process is killed on timeout.
+  Future<({int exitCode, List<int> stdout, List<int> stderr})> _runWithTimeout(
     String executable,
     List<String> arguments, {
-    bool createNoWindow = false,
-  }) {
-    return Process.run(
-      executable,
-      arguments,
-      runInShell: false,
-      // On Windows we hide the console window for interactive tools.
-      // This only takes effect when the current process already has a console;
-      // it is harmless on other platforms.
-      environment: createNoWindow ? null : null,
-    ).catchError((Object error) {
-      if (error is OSError) {
-        // errno 2 / ENOENT → command not found.
-        if (error.errorCode == 2) {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    late Process process;
+    try {
+      process = await Process.start(executable, arguments, runInShell: false);
+
+      final stdoutFuture = process.stdout.expand((x) => x).toList();
+      final stderrFuture = process.stderr.expand((x) => x).toList();
+      final exitCodeFuture = process.exitCode.timeout(
+        timeout,
+        onTimeout: () {
+          process.kill();
+          throw TimeoutException('$executable timed out');
+        },
+      );
+
+      final results = await Future.wait<dynamic>(
+        [stdoutFuture, stderrFuture, exitCodeFuture],
+        eagerError: true,
+      );
+
+      return (
+        exitCode: results[2] as int,
+        stdout: results[0] as List<int>,
+        stderr: results[1] as List<int>,
+      );
+    } on TimeoutException catch (_) {
+      throw SshKeyException(
+        SshKeyErrorCode.timeout,
+        '$executable timed out after ${timeout.inSeconds}s.',
+      );
+    } catch (e) {
+      process.kill();
+      if (e is SshKeyException) rethrow;
+      if (e is OSError) {
+        if (e.errorCode == 2) {
           throw SshKeyException(
             SshKeyErrorCode.commandNotFound,
             '$executable is not installed or not found on PATH.',
-            rawDetail: error.toString(),
+            rawDetail: e.toString(),
           );
         }
       }
       throw SshKeyException(
         SshKeyErrorCode.commandNotFound,
         'Failed to launch $executable.',
-        rawDetail: error.toString(),
+        rawDetail: e.toString(),
       );
-    });
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -182,9 +214,9 @@ class SshKeyManager {
   /// Throws [SshKeyException] with code [SshKeyErrorCode.commandNotFound] if
   /// `ssh-add` itself is unavailable.
   Future<List<LoadedKey>> listLoadedKeys() async {
-    final result = await _runOrThrow('ssh-add', ['-l']);
+    final result = await _runWithTimeout('ssh-add', ['-l']);
 
-    final stderr = result.stderr.toString().trim();
+    final stderr = utf8.decode(result.stderr).trim();
 
     // ssh-add exits 1 when the agent has no keys — valid, not an error.
     if (result.exitCode == 1) return [];
@@ -201,7 +233,7 @@ class SshKeyManager {
       );
     }
 
-    final stdout = result.stdout.toString().trim();
+    final stdout = utf8.decode(result.stdout).trim();
     if (stdout.isEmpty) return [];
 
     return _parseLoadedKeys(stdout);
@@ -252,14 +284,99 @@ class SshKeyManager {
   // addKey
   // -----------------------------------------------------------------------
 
+  /// Checks whether the private key at [path] is protected by a passphrase.
+  Future<bool> hasPassphrase(String path) async {
+    try {
+      final result = await _runWithTimeout(
+        'ssh-keygen',
+        ['-y', '-P', '', '-f', path],
+      );
+      if (result.exitCode == 0) return false;
+      final stderr = utf8.decode(result.stderr);
+      return stderr.toLowerCase().contains('passphrase');
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Adds the private key at [path] to the ssh-agent.
-  Future<void> addKey(String path) async {
-    final result = await _runOrThrow('ssh-add', [path]);
+  ///
+  /// If [passphrase] is provided it is piped to `ssh-add`'s stdin so
+  /// passphrase-protected keys load without hanging for interactive input.
+  /// If [passphrase] is null and the key is protected the call will fail
+  /// fast (instead of hanging) thanks to the timeout in [_runWithTimeout].
+  Future<void> addKey(String path, {String? passphrase}) async {
+    if (passphrase != null) {
+      await _addKeyWithPassphrase(path, passphrase);
+      return;
+    }
+    final result = await _runWithTimeout('ssh-add', [path]);
     if (result.exitCode != 0) {
       throw SshKeyException(
         SshKeyErrorCode.agentCommandFailed,
         'ssh-add failed for $path (exit code ${result.exitCode}).',
-        rawDetail: '${result.stdout}\n${result.stderr}',
+        rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
+      );
+    }
+  }
+
+  /// Adds a passphrase-protected key by piping the passphrase to
+  /// `ssh-add` via the shell so it never blocks waiting for interactive input.
+  /// On Windows, `ssh-add` does not reliably read from stdin when started
+  /// via `Process.start`, so we use `cmd /c echo pass | ssh-add path`.
+  Future<void> _addKeyWithPassphrase(
+    String path,
+    String passphrase,
+  ) async {
+    try {
+      // Escape double quotes in the passphrase for cmd.exe.
+      final escapedPassphrase = passphrase.replaceAll('"', '""');
+      final result = await Process.run(
+        'cmd.exe',
+        ['/c', 'echo $escapedPassphrase | ssh-add', path],
+        runInShell: false,
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw SshKeyException(
+            SshKeyErrorCode.wrongPassphrase,
+            'The passphrase is incorrect.',
+          );
+        },
+      );
+
+      final stdout = utf8.decode(result.stdout);
+      final stderr = utf8.decode(result.stderr);
+
+      if (result.exitCode != 0) {
+        // Detect wrong passphrase from ssh-add's stderr output.
+        if (stderr.toLowerCase().contains('bad passphrase') ||
+            stderr.toLowerCase().contains('incorrect') ||
+            stderr.toLowerCase().contains('permission denied') ||
+            stderr.toLowerCase().contains('unauthorized')) {
+          throw SshKeyException(
+            SshKeyErrorCode.wrongPassphrase,
+            'The passphrase is incorrect.',
+            rawDetail: stderr,
+          );
+        }
+        throw SshKeyException(
+          SshKeyErrorCode.agentCommandFailed,
+          'ssh-add failed for $path (exit code ${result.exitCode}).',
+          rawDetail: '$stdout\n$stderr',
+        );
+      }
+    } on TimeoutException catch (_) {
+      throw SshKeyException(
+        SshKeyErrorCode.wrongPassphrase,
+        'The passphrase is incorrect.',
+      );
+    } catch (e) {
+      if (e is SshKeyException) rethrow;
+      throw SshKeyException(
+        SshKeyErrorCode.agentCommandFailed,
+        'Failed to add key $path.',
+        rawDetail: e.toString(),
       );
     }
   }
@@ -270,12 +387,12 @@ class SshKeyManager {
 
   /// Removes the identity at [path] from the ssh-agent.
   Future<void> removeKey(String path) async {
-    final result = await _runOrThrow('ssh-add', ['-d', path]);
+    final result = await _runWithTimeout('ssh-add', ['-d', path]);
     if (result.exitCode != 0) {
       throw SshKeyException(
         SshKeyErrorCode.agentCommandFailed,
         'ssh-add -d failed for $path (exit code ${result.exitCode}).',
-        rawDetail: '${result.stdout}\n${result.stderr}',
+        rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
       );
     }
   }
@@ -286,12 +403,12 @@ class SshKeyManager {
 
   /// Removes all identities from the ssh-agent.
   Future<void> removeAll() async {
-    final result = await _runOrThrow('ssh-add', ['-D']);
+    final result = await _runWithTimeout('ssh-add', ['-D']);
     if (result.exitCode != 0) {
       throw SshKeyException(
         SshKeyErrorCode.agentCommandFailed,
         'ssh-add -D failed (exit code ${result.exitCode}).',
-        rawDetail: '${result.stdout}\n${result.stderr}',
+        rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
       );
     }
   }
@@ -373,7 +490,12 @@ class SshKeyManager {
       args.first,
       args.sublist(1),
       runInShell: false,
-    );
+    ).timeout(const Duration(seconds: 30), onTimeout: () {
+      throw SshKeyException(
+        SshKeyErrorCode.keygenFailed,
+        'ssh-keygen timed out after 30s.',
+      );
+    });
 
     if (result.exitCode != 0) {
       // Clean up partial files if keygen partially wrote.
@@ -385,7 +507,7 @@ class SshKeyManager {
       throw SshKeyException(
         SshKeyErrorCode.keygenFailed,
         'ssh-keygen failed (exit code ${result.exitCode}).',
-        rawDetail: '${result.stdout}\n${result.stderr}',
+        rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
       );
     }
   }

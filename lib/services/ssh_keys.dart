@@ -344,9 +344,10 @@ class SshKeyManager {
 
   /// Adds the private key at [path] to the ssh-agent.
   ///
-  /// If [passphrase] is provided it is piped to `ssh-add`'s stdin so
-  /// passphrase-protected keys load without hanging for interactive input.
-  /// If [passphrase] is null and the key is protected the call will fail
+  /// If [passphrase] is provided, a temporary copy is decrypted via `ssh-keygen -p`
+  /// and added to `ssh-agent`, avoiding Windows OpenSSH stdin/TTY blocking issues.
+  /// The temporary file is securely deleted immediately after adding.
+  /// If [passphrase] is null and the key is protected, the call will fail
   /// fast (instead of hanging) thanks to the timeout in [_runWithTimeout].
   Future<void> addKey(String path, {String? passphrase}) async {
     if (passphrase != null) {
@@ -363,64 +364,90 @@ class SshKeyManager {
     }
   }
 
-  /// Adds a passphrase-protected key by piping the passphrase to
-  /// `ssh-add` via the shell so it never blocks waiting for interactive input.
-  /// On Windows, `ssh-add` does not reliably read from stdin when started
-  /// via `Process.start`, so we use `cmd /c echo pass | ssh-add path`.
+  /// Adds a passphrase-protected key by creating a temporary copy, removing its
+  /// passphrase using `ssh-keygen -p`, adding the temporary key to `ssh-agent`,
+  /// and then securely deleting the temporary file.
+  ///
+  /// On Windows OpenSSH, `ssh-add` does not read passphrases from stdin when
+  /// stdin is not a TTY. This approach bypasses that limitation cleanly and
+  /// fails immediately if the passphrase is incorrect.
   Future<void> _addKeyWithPassphrase(
     String path,
     String passphrase,
   ) async {
+    final origFile = File(path);
+    if (!await origFile.exists()) {
+      throw SshKeyException(
+        SshKeyErrorCode.agentCommandFailed,
+        'Key file not found: $path',
+      );
+    }
+
+    final tempDir = Directory.systemTemp;
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final tempFile = File('${tempDir.path}${Platform.pathSeparator}ssh_temp_$timestamp');
+
     try {
-      // Escape double quotes in the passphrase for cmd.exe.
-      final escapedPassphrase = passphrase.replaceAll('"', '""');
-      final result = await Process.run(
-        'cmd.exe',
-        ['/c', 'echo $escapedPassphrase | ssh-add', path],
-        runInShell: false,
-      ).timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw SshKeyException(
-            SshKeyErrorCode.wrongPassphrase,
-            'The passphrase is incorrect.',
-          );
-        },
+      await origFile.copy(tempFile.path);
+
+      // Decrypt the temporary copy via ssh-keygen -p -P <passphrase> -N "" -f <tempFile>
+      final keygenResult = await _runWithTimeout(
+        'ssh-keygen',
+        ['-p', '-P', passphrase, '-N', '', '-f', tempFile.path],
+        timeout: const Duration(seconds: 10),
       );
 
-      final stdout = utf8.decode(result.stdout);
-      final stderr = utf8.decode(result.stderr);
-
-      if (result.exitCode != 0) {
-        // Detect wrong passphrase from ssh-add's stderr output.
-        if (stderr.toLowerCase().contains('bad passphrase') ||
-            stderr.toLowerCase().contains('incorrect') ||
-            stderr.toLowerCase().contains('permission denied') ||
-            stderr.toLowerCase().contains('unauthorized')) {
+      if (keygenResult.exitCode != 0) {
+        final stdout = utf8.decode(keygenResult.stdout);
+        final stderr = utf8.decode(keygenResult.stderr);
+        final combined = '$stdout\n$stderr'.toLowerCase();
+        if (combined.contains('incorrect passphrase') ||
+            combined.contains('bad passphrase') ||
+            combined.contains('failed to load key') ||
+            combined.contains('passphrase') ||
+            combined.contains('permission denied')) {
           throw SshKeyException(
             SshKeyErrorCode.wrongPassphrase,
             'The passphrase is incorrect.',
-            rawDetail: stderr,
+            rawDetail: stderr.isNotEmpty ? stderr : stdout,
           );
         }
         throw SshKeyException(
-          SshKeyErrorCode.agentCommandFailed,
-          'ssh-add failed for $path (exit code ${result.exitCode}).',
+          SshKeyErrorCode.wrongPassphrase,
+          'The passphrase is incorrect or key decryption failed.',
           rawDetail: '$stdout\n$stderr',
         );
       }
-    } on TimeoutException catch (_) {
-      throw SshKeyException(
-        SshKeyErrorCode.wrongPassphrase,
-        'The passphrase is incorrect.',
-      );
-    } catch (e) {
-      if (e is SshKeyException) rethrow;
-      throw SshKeyException(
-        SshKeyErrorCode.agentCommandFailed,
-        'Failed to add key $path.',
-        rawDetail: e.toString(),
-      );
+
+      // Add the decrypted temporary key to ssh-agent
+      final addResult = await _runWithTimeout('ssh-add', [tempFile.path]);
+      if (addResult.exitCode != 0) {
+        throw SshKeyException(
+          SshKeyErrorCode.agentCommandFailed,
+          'ssh-add failed for $path (exit code ${addResult.exitCode}).',
+          rawDetail: '${utf8.decode(addResult.stdout)}\n${utf8.decode(addResult.stderr)}',
+        );
+      }
+    } on SshKeyException catch (e) {
+      if (e.code == SshKeyErrorCode.timeout) {
+        throw SshKeyException(
+          SshKeyErrorCode.wrongPassphrase,
+          'The passphrase is incorrect or key verification timed out.',
+        );
+      }
+      rethrow;
+    } finally {
+      try {
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+        final tempPub = File('${tempFile.path}.pub');
+        if (await tempPub.exists()) {
+          await tempPub.delete();
+        }
+      } catch (_) {
+        // Ignore cleanup errors
+      }
     }
   }
 

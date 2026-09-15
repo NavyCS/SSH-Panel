@@ -452,44 +452,33 @@ class _KeysTabState extends State<KeysTab> {
     });
     try {
       if (await _keyManager.hasPassphrase(path)) {
-        // Keep prompting until the correct passphrase is entered or user cancels.
-        while (true) {
-          final passphrase = await _promptPassphrase();
-          if (passphrase == null) {
-            if (!mounted) return;
-            setState(() {
-              _loading = false;
-              _error = null;
-            });
-            return;
-          }
-          try {
-            await _keyManager.addKey(path, passphrase: passphrase);
-            if (!mounted) return;
-            await _refresh();
-            break; // Success — exit the loop.
-          } on SshKeyException catch (e) {
-            if (!mounted) return;
-            if (e.code == SshKeyErrorCode.wrongPassphrase) {
-              setState(() {
-                _error = 'The passphrase is incorrect. Try again.';
-                _loading = false;
-              });
-              // Loop back to re-prompt.
-              continue;
-            }
-            // Some other error — show it and stop.
-            setState(() {
-              _error = e.toString();
-              _loading = false;
-            });
-            break;
-          }
+        final passphrase = await _promptPassphrase();
+        if (passphrase == null) {
+          if (!mounted) return;
+          setState(() {
+            _loading = false;
+            _error = null;
+          });
+          return;
         }
+        await _keyManager.addKey(path, passphrase: passphrase);
+        if (!mounted) return;
+        await _refresh();
       } else {
         await _keyManager.addKey(path);
+        if (!mounted) return;
         await _refresh();
       }
+    } on SshKeyException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (e.code == SshKeyErrorCode.wrongPassphrase) {
+          _error = 'The passphrase is incorrect.';
+        } else {
+          _error = e.toString();
+        }
+        _loading = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {

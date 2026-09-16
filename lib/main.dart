@@ -1166,11 +1166,14 @@ child: ShadButton.ghost(
                     ),
                   )
                 : _loadedKeys.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          'No keys loaded in the agent',
-                          style: theme.textTheme.muted,
+                    ? SizedBox(
+                        width: double.infinity,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            'No keys loaded in the agent',
+                            style: theme.textTheme.muted,
+                          ),
                         ),
                       )
                     : Column(

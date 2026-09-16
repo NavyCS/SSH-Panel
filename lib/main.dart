@@ -708,12 +708,16 @@ List<AuthorizedKey> _authorizedKeys = [];
                 placeholder: const Text('Comment (optional, ex. myname@example.com)'),
               ),
               const SizedBox(height: 12),
-              ShadCheckbox(
-                value: passphraseProtected,
-                onChanged: (value) {
-                  setStateDialog(() => passphraseProtected = value);
-                },
-                label: const Text('Protect with passphrase'),
+              Row(
+                children: [
+                  ShadCheckbox(
+                    value: passphraseProtected,
+                    onChanged: (value) {
+                      setStateDialog(() => passphraseProtected = value);
+                    },
+                    label: const Text('Protect with passphrase'),
+                  ),
+                ],
               ),
             ],
           ),

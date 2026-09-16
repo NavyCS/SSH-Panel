@@ -304,6 +304,35 @@ class SshKeyManager {
     }
   }
 
+  /// Obtains the comment embedded in the public key at [path].
+  ///
+  /// Runs `ssh-keygen -l -f <path>` and extracts the comment field (the text
+  /// between the fingerprint and the trailing `(TYPE)` token). Returns an
+  /// empty string when the key has no comment, or null when the file cannot
+  /// be parsed or is not an SSH key.
+  Future<String?> getKeyComment(String path) async {
+    try {
+      final result = await _runWithTimeout(
+        'ssh-keygen',
+        ['-l', '-f', path],
+        timeout: const Duration(seconds: 5),
+      );
+      if (result.exitCode != 0) return null;
+      final stdout = utf8.decode(result.stdout).trim();
+      final typeMatch = RegExp(r'\((\w+)\)\s*$').firstMatch(stdout);
+      if (typeMatch == null) return null;
+      final beforeType = stdout.substring(0, typeMatch.start).trimRight();
+      final fpMatch =
+          RegExp(r'(SHA256:[A-Za-z0-9/+]+|MD5:[A-Fa-f0-9:]+)').firstMatch(
+        beforeType,
+      );
+      if (fpMatch == null) return null;
+      return beforeType.substring(fpMatch.end).trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // -----------------------------------------------------------------------
   // listLoadedKeys
   // -----------------------------------------------------------------------

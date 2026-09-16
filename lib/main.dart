@@ -443,6 +443,7 @@ class _KeysTabState extends State<KeysTab> {
 List<AuthorizedKey> _authorizedKeys = [];
     Map<String, String> _keyFingerprints = {};
     Map<String, bool> _hasPubKey = {};
+    Map<String, String> _keyComments = {};
     bool _loading = false;
     String? _error;
 
@@ -467,12 +468,17 @@ List<AuthorizedKey> _authorizedKeys = [];
 
       final fingerprints = <String, String>{};
       final hasPub = <String, bool>{};
+      final comments = <String, String>{};
       for (final path in keyFiles) {
         final fp = await _keyManager.getKeyFingerprint(path);
         if (fp != null) {
           fingerprints[path] = fp;
         }
         hasPub[path] = await File('$path.pub').exists();
+        final comment = await _keyManager.getKeyComment(path);
+        if (comment != null && comment.isNotEmpty) {
+          comments[path] = comment;
+        }
       }
 
       if (!mounted) return;
@@ -481,6 +487,7 @@ List<AuthorizedKey> _authorizedKeys = [];
         _loadedKeys = loadedKeys;
         _keyFingerprints = fingerprints;
         _hasPubKey = hasPub;
+        _keyComments = comments;
         _authorizedKeys = authorizedKeys;
         _loading = false;
       });
@@ -964,9 +971,19 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              _shortPath(path),
-              style: theme.textTheme.small,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _shortPath(path),
+                  style: theme.textTheme.small,
+                ),
+                if (_keyComments[path] != null && _keyComments[path]!.isNotEmpty)
+                  Text(
+                    _keyComments[path]!,
+                    style: theme.textTheme.muted,
+                  ),
+              ],
             ),
           ),
           DisabledActionWrapper(
@@ -1151,16 +1168,16 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                  onPressed: _loading ? null : _generateKey,
                  child: const Text('Generate'),
                ),
-               ShadButton.ghost(
-                 onPressed: _loading ? null : _refresh,
-                 child: const Icon(LucideIcons.refreshCw, size: 16),
-               ),
-               ShadButton.outline(
-                 onPressed: _loading ? null : _removeAll,
-                 child: const Text('Unload All'),
-               ),
-            ],
-          ),
+ShadButton.outline(
+                   onPressed: _loading ? null : _removeAll,
+                  child: const Text('Unload All'),
+                ),
+                ShadButton.ghost(
+                  onPressed: _loading ? null : _refresh,
+                  child: const Text('Refresh'),
+                ),
+             ],
+           ),
 
           const SizedBox(height: 16),
 

@@ -986,15 +986,16 @@ class _KeysTabState extends State<KeysTab> {
             ),
           ),
           const SizedBox(width: 4),
-          DisabledActionWrapper(
-            enabled: !_loading,
-            tooltip: 'Delete ${_shortPath(path)} and its .pub file',
-            child: ShadIconButton(
-              iconSize: 18,
+          ShadTooltip(
+            builder: (context) => const Text('Delete key file'),
+            child: IconButton(
               icon: Icon(
                 LucideIcons.trash2,
-                color: theme.colorScheme.destructive,
+                size: 18,
+                color: !_loading ? theme.colorScheme.destructive : theme.colorScheme.muted,
               ),
+              hoverColor: theme.colorScheme.destructive.withValues(alpha: 0.12),
+              splashRadius: 18,
               onPressed: !_loading ? () => _deleteKeyFile(path) : null,
             ),
           ),

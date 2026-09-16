@@ -1868,34 +1868,40 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               ],
             ),
             description: const Text('Contents of ~/.ssh/config'),
-            footer: Row(
+            footer: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                ShadButton.outline(
-                  onPressed: _loading ? null : _refresh,
-                  child: const Text('Reload'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    ShadButton.outline(
+                      onPressed: _loading ? null : _refresh,
+                      child: const Text('Reload'),
+                    ),
+                    const SizedBox(width: 8),
+                    if (!_editing)
+                      ShadButton.outline(
+                        onPressed: _loading ? null : () => setState(() => _editing = true),
+                        child: const Text('Edit'),
+                      ),
+                    if (_editing) ...[
+                      ShadButton(
+                        onPressed: _loading ? null : _saveConfig,
+                        child: const Text('Save'),
+                      ),
+                      const SizedBox(width: 8),
+                      ShadButton.outline(
+                        onPressed: _loading
+                            ? null
+                            : () {
+                                _configController.text = _configManager.readConfig();
+                                setState(() => _editing = false);
+                              },
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(width: 8),
-                if (!_editing)
-                  ShadButton.outline(
-                    onPressed: _loading ? null : () => setState(() => _editing = true),
-                    child: const Text('Edit'),
-                  ),
-                if (_editing) ...[
-                  ShadButton(
-                    onPressed: _loading ? null : _saveConfig,
-                    child: const Text('Save'),
-                  ),
-                  const SizedBox(width: 8),
-                  ShadButton.outline(
-                    onPressed: _loading
-                        ? null
-                        : () {
-                            _configController.text = _configManager.readConfig();
-                            setState(() => _editing = false);
-                          },
-                    child: const Text('Cancel'),
-                  ),
-                ],
               ],
             ),
             child: Padding(

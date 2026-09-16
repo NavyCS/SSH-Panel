@@ -700,12 +700,12 @@ List<AuthorizedKey> _authorizedKeys = [];
               const SizedBox(height: 12),
               ShadInput(
                 controller: nameController,
-                placeholder: const Text('Key name (ex. example, id_ed25519)'),
+                placeholder: const Text('Key name (optional, ex. id_ed25519)'),
               ),
               const SizedBox(height: 12),
               ShadInput(
                 controller: commentController,
-                placeholder: const Text('Comment (optional)'),
+                placeholder: const Text('Comment (optional, ex. myname@example.com)'),
               ),
               const SizedBox(height: 12),
               ShadCheckbox(

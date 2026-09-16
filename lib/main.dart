@@ -966,7 +966,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           ),
           DisabledActionWrapper(
             enabled: !_loading,
-            tooltip: 'View public key',
+            tooltip: 'View public key of ${_shortPath(path)}',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: !_loading ? () => _viewPublicKey(path) : null,
@@ -978,7 +978,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             enabled: canLoad,
             tooltip: isLoaded
                 ? 'Key is already loaded in agent'
-                : 'Load into ssh-agent ($path)',
+                : 'Load ${_shortPath(path)} into ssh-agent',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: canLoad ? () => _addKey(path) : null,
@@ -989,7 +989,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             enabled: canUnload,
             tooltip: !isLoaded
                 ? 'Key is not loaded in agent'
-                : 'Unload from ssh-agent ($path)',
+                : 'Unload ${_shortPath(path)} from ssh-agent',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: canUnload ? () => _removeKey(path) : null,

@@ -438,14 +438,16 @@ class KeysTab extends StatefulWidget {
 
 class _KeysTabState extends State<KeysTab> {
   final _keyManager = SshKeyManager();
+  final _serviceManager = SshServiceManager();
   List<String> _keyFiles = [];
   List<LoadedKey> _loadedKeys = [];
-List<AuthorizedKey> _authorizedKeys = [];
-    Map<String, String> _keyFingerprints = {};
-    Map<String, bool> _hasPubKey = {};
-    Map<String, String> _keyComments = {};
-    bool _loading = false;
-    String? _error;
+  List<AuthorizedKey> _authorizedKeys = [];
+  Map<String, String> _keyFingerprints = {};
+  Map<String, bool> _hasPubKey = {};
+  Map<String, String> _keyComments = {};
+  bool _loading = false;
+  String? _error;
+  bool _agentRunning = false;
 
   @override
   void initState() {
@@ -481,6 +483,14 @@ List<AuthorizedKey> _authorizedKeys = [];
         }
       }
 
+      // The ssh-agent must be running for Load/Unload/Remove All to work.
+      SshServiceState agentState;
+      try {
+        agentState = await _serviceManager.checkStatus();
+      } catch (_) {
+        agentState = SshServiceState.stopped;
+      }
+
       if (!mounted) return;
       setState(() {
         _keyFiles = keyFiles;
@@ -489,6 +499,7 @@ List<AuthorizedKey> _authorizedKeys = [];
         _hasPubKey = hasPub;
         _keyComments = comments;
         _authorizedKeys = authorizedKeys;
+        _agentRunning = agentState == SshServiceState.running;
         _loading = false;
       });
     } on TimeoutException catch (_) {
@@ -958,8 +969,8 @@ List<AuthorizedKey> _authorizedKeys = [];
 
 Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final isLoaded = _isKeyLoaded(path);
-    final canLoad = !_loading && !isLoaded;
-    final canUnload = !_loading && isLoaded;
+    final canLoad = !_loading && _agentRunning && !isLoaded;
+    final canUnload = !_loading && _agentRunning && isLoaded;
     final hasPub = _hasPubKey[path] ?? false;
 
     return Padding(
@@ -1001,9 +1012,11 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           const SizedBox(width: 4),
           DisabledActionWrapper(
             enabled: canLoad,
-            tooltip: isLoaded
-                ? 'Key is already loaded in agent'
-                : 'Load ${_shortPath(path)} into ssh-agent',
+            tooltip: !_agentRunning
+                ? 'Start the ssh-agent service first'
+                : isLoaded
+                    ? 'Key is already loaded in agent'
+                    : 'Load ${_shortPath(path)} into ssh-agent',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: canLoad ? () => _addKey(path) : null,
@@ -1012,9 +1025,11 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           ),
           DisabledActionWrapper(
             enabled: canUnload,
-            tooltip: !isLoaded
-                ? 'Key is not loaded in agent'
-                : 'Unload ${_shortPath(path)} from ssh-agent',
+            tooltip: !_agentRunning
+                ? 'Start the ssh-agent service first'
+                : !isLoaded
+                    ? 'Key is not loaded in agent'
+                    : 'Unload ${_shortPath(path)} from ssh-agent',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: canUnload ? () => _removeKey(path) : null,
@@ -1170,9 +1185,9 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                  child: const Text('Generate'),
                ),
 ShadButton.outline(
-                   onPressed: _loading ? null : _removeAll,
-                  child: const Text('Unload All'),
-                ),
+                    onPressed: _loading || !_agentRunning ? null : _removeAll,
+                   child: const Text('Unload All'),
+                 ),
                 ShadButton.ghost(
                   onPressed: _loading ? null : _refresh,
                   child: const Text('Refresh'),
@@ -1247,18 +1262,38 @@ ShadButton.outline(
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : _loadedKeys.isEmpty
+                : !_agentRunning
                     ? SizedBox(
                         width: double.infinity,
                         child: Padding(
                           padding: const EdgeInsets.all(12),
-                          child: Text(
-                            'No keys loaded in the agent',
-                            style: theme.textTheme.muted,
+                          child: Row(
+                            children: [
+                              const Icon(LucideIcons.powerOff, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'The ssh-agent service is stopped. Start it '
+                                  'from the Service tab to load or unload keys.',
+                                  style: theme.textTheme.muted,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       )
-                    : Column(
+                    : _loadedKeys.isEmpty
+                        ? SizedBox(
+                            width: double.infinity,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Text(
+                                'No keys loaded in the agent',
+                                style: theme.textTheme.muted,
+                              ),
+                            ),
+                          )
+                        : Column(
                         children: [
                           for (final key in _loadedKeys)
                             Padding(

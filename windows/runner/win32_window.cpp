@@ -213,6 +213,18 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_GETMINMAXINFO: {
+      // Enforce the minimum window size if one has been set.
+      if (minimum_size_.width > 0 && minimum_size_.height > 0) {
+        auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+        info->ptMinTrackSize.x =
+            static_cast<LONG>(minimum_size_.width);
+        info->ptMinTrackSize.y =
+            static_cast<LONG>(minimum_size_.height);
+      }
+      return 0;
+    }
+
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;
@@ -261,6 +273,37 @@ HWND Win32Window::GetHandle() {
 
 void Win32Window::SetQuitOnClose(bool quit_on_close) {
   quit_on_close_ = quit_on_close;
+}
+
+void Win32Window::SetMinimumSize(const Size& size) {
+  minimum_size_ = size;
+}
+
+void Win32Window::CenterOnScreen() {
+  if (!window_handle_) return;
+
+  RECT window_rect;
+  GetWindowRect(window_handle_, &window_rect);
+  int window_width = window_rect.right - window_rect.left;
+  int window_height = window_rect.bottom - window_rect.top;
+
+  HMONITOR monitor = MonitorFromWindow(window_handle_, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{};
+  monitor_info.cbSize = sizeof(MONITORINFO);
+  if (GetMonitorInfo(monitor, &monitor_info)) {
+    int monitor_x = monitor_info.rcMonitor.left;
+    int monitor_y = monitor_info.rcMonitor.top;
+    int monitor_width =
+        monitor_info.rcMonitor.right - monitor_info.rcMonitor.left;
+    int monitor_height =
+        monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top;
+
+    int new_x = monitor_x + (monitor_width - window_width) / 2;
+    int new_y = monitor_y + (monitor_height - window_height) / 2;
+
+    SetWindowPos(window_handle_, nullptr, new_x, new_y, 0, 0,
+                 SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+  }
 }
 
 bool Win32Window::OnCreate() {

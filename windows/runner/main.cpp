@@ -25,12 +25,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
-  Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"ssh_panel", origin, size)) {
+  if (!window.Create(L"ssh_panel", Win32Window::Point(0, 0), size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
+  // Center the window on the primary monitor.
+  window.CenterOnScreen();
+  // Prevent the window from being resized below a usable minimum.
+  window.SetMinimumSize(Win32Window::Size(800, 600));
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {

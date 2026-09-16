@@ -52,10 +52,16 @@ class Win32Window {
   // If true, closing this window will quit the application.
   void SetQuitOnClose(bool quit_on_close);
 
+  // Set the minimum size the window can be resized to.
+  void SetMinimumSize(const Size& size);
+
+  // Center the window on the primary monitor.
+  void CenterOnScreen();
+
   // Return a RECT representing the bounds of the current client area.
   RECT GetClientArea();
 
- protected:
+  protected:
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that
   // inheriting classes can handle.
@@ -91,6 +97,9 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+
+  // Minimum size the window can be resized to (0,0 = no constraint).
+  Size minimum_size_{0, 0};
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

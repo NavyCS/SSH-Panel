@@ -985,9 +985,80 @@ class _KeysTabState extends State<KeysTab> {
               child: const Text('Unload'),
             ),
           ),
+          const SizedBox(width: 4),
+          DisabledActionWrapper(
+            enabled: !_loading,
+            tooltip: 'Delete ${_shortPath(path)} and its .pub file',
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: !_loading ? () => _deleteKeyFile(path) : null,
+              child: const Icon(LucideIcons.trash2, size: 14),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Deletes the key file at [path] from disk, unloading it from the agent
+  /// first if it is currently loaded.
+  Future<void> _deleteKeyFile(String path) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ShadDialog(
+        title: const Text('Delete Key'),
+        description: Text(
+          'Are you sure you want to permanently delete '
+          '${_shortPath(path)} and its .pub companion file?\n\n'
+          'If the key is loaded in ssh-agent, it will be unloaded first.',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          ShadButton.ghost(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ShadButton.destructive(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      // Unload from the agent before deleting the file from disk.
+      if (_isKeyLoaded(path)) {
+        try {
+          await _keyManager.removeKey(path);
+        } on SshKeyException catch (_) {
+          // The agent may reject the unload (e.g. path mismatch); the file
+          // deletion below still proceeds so the user is never stuck.
+        }
+      }
+
+      await _keyManager.deleteKeyFile(path);
+      await _refresh();
+    } on SshKeyException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
   }
 
   @override

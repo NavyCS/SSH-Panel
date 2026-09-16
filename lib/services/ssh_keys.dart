@@ -245,6 +245,27 @@ class SshKeyManager {
     return results;
   }
 
+  /// Obtains the public-key SHA-256 fingerprint for a key file at [path].
+  ///
+  /// Runs `ssh-keygen -l -f <path>` which works on both unprotected and
+  /// passphrase-protected keys without prompting for interactive input.
+  /// Returns null if the file cannot be parsed or is not an SSH key.
+  Future<String?> getKeyFingerprint(String path) async {
+    try {
+      final result = await _runWithTimeout(
+        'ssh-keygen',
+        ['-l', '-f', path],
+        timeout: const Duration(seconds: 5),
+      );
+      if (result.exitCode != 0) return null;
+      final stdout = utf8.decode(result.stdout).trim();
+      final fpMatch = RegExp(r'(SHA256:[A-Za-z0-9/+]+|MD5:[A-Fa-f0-9:]+)').firstMatch(stdout);
+      return fpMatch?.group(0);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // -----------------------------------------------------------------------
   // listLoadedKeys
   // -----------------------------------------------------------------------

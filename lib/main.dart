@@ -384,6 +384,47 @@ class _ServiceTabState extends State<ServiceTab> {
 }
 
 // ===========================================================================
+// Reusable Action Wrapper for Disabled States
+// ===========================================================================
+
+/// A reusable wrapper that ensures disabled buttons properly look and behave
+/// as disabled: applies opacity, blocks internal pointer hover effects,
+/// and adjusts the mouse cursor, while keeping the tooltip active and informative.
+class DisabledActionWrapper extends StatelessWidget {
+  const DisabledActionWrapper({
+    super.key,
+    required this.enabled,
+    required this.tooltip,
+    required this.child,
+    this.disabledOpacity = 0.35,
+    this.disabledCursor = SystemMouseCursors.basic,
+  });
+
+  final bool enabled;
+  final String tooltip;
+  final Widget child;
+  final double disabledOpacity;
+  final MouseCursor disabledCursor;
+
+  @override
+  Widget build(BuildContext context) {
+    return ShadTooltip(
+      builder: (context) => Text(tooltip),
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : disabledCursor,
+        child: Opacity(
+          opacity: enabled ? 1.0 : disabledOpacity,
+          child: IgnorePointer(
+            ignoring: !enabled,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 // Keys tab
 // ===========================================================================
 
@@ -398,6 +439,7 @@ class _KeysTabState extends State<KeysTab> {
   final _keyManager = SshKeyManager();
   List<String> _keyFiles = [];
   List<LoadedKey> _loadedKeys = [];
+  Map<String, String> _keyFingerprints = {};
   bool _loading = false;
   String? _error;
 
@@ -417,10 +459,20 @@ class _KeysTabState extends State<KeysTab> {
           .timeout(const Duration(seconds: 30));
       final loadedKeys = await _keyManager.listLoadedKeys()
           .timeout(const Duration(seconds: 30));
+
+      final fingerprints = <String, String>{};
+      for (final path in keyFiles) {
+        final fp = await _keyManager.getKeyFingerprint(path);
+        if (fp != null) {
+          fingerprints[path] = fp;
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _keyFiles = keyFiles;
         _loadedKeys = loadedKeys;
+        _keyFingerprints = fingerprints;
         _loading = false;
       });
     } on TimeoutException catch (_) {
@@ -764,6 +816,70 @@ class _KeysTabState extends State<KeysTab> {
     Process.run('explorer', [dir], runInShell: false);
   }
 
+  bool _isKeyLoaded(String path) {
+    final fp = _keyFingerprints[path];
+    if (fp != null && fp.isNotEmpty) {
+      if (_loadedKeys.any((k) => k.fingerprint == fp)) {
+        return true;
+      }
+    }
+    final normalizedPath = path.replaceAll('/', '\\').toLowerCase();
+    final fileName = _shortPath(path).toLowerCase();
+    return _loadedKeys.any((k) {
+      final kPath = k.path.replaceAll('/', '\\').toLowerCase();
+      return kPath == normalizedPath ||
+          kPath.endsWith('\\$fileName') ||
+          kPath == fileName;
+    });
+  }
+
+  Widget _buildKeyFileRow(ShadThemeData theme, String path) {
+    final isLoaded = _isKeyLoaded(path);
+    final canLoad = !_loading && !isLoaded;
+    final canUnload = !_loading && isLoaded;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          const Icon(
+            LucideIcons.keyRound,
+            size: 14,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _shortPath(path),
+              style: theme.textTheme.small,
+            ),
+          ),
+          DisabledActionWrapper(
+            enabled: canLoad,
+            tooltip: isLoaded
+                ? 'Key is already loaded in agent'
+                : 'Load into ssh-agent ($path)',
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: canLoad ? () => _addKey(path) : null,
+              child: const Text('Load'),
+            ),
+          ),
+          DisabledActionWrapper(
+            enabled: canUnload,
+            tooltip: !isLoaded
+                ? 'Key is not loaded in agent'
+                : 'Unload from ssh-agent ($path)',
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: canUnload ? () => _removeKey(path) : null,
+              child: const Text('Unload'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
@@ -837,44 +953,7 @@ class _KeysTabState extends State<KeysTab> {
                     : Column(
                         children: [
                           for (final path in _keyFiles)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    LucideIcons.keyRound,
-                                    size: 14,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      _shortPath(path),
-                                      style: theme.textTheme.small,
-                                    ),
-                                  ),
-                                  ShadTooltip(
-                                    builder: (context) => Text(path),
-                                    child: ShadButton.ghost(
-                                      size: ShadButtonSize.sm,
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _addKey(path),
-                                      child: const Text('Load'),
-                                    ),
-                                  ),
-                                  ShadTooltip(
-                                    builder: (context) => Text(path),
-                                    child: ShadButton.ghost(
-                                      size: ShadButtonSize.sm,
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _removeKey(path),
-                                      child: const Text('Unload'),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                            _buildKeyFileRow(theme, path),
                           const SizedBox(height: 12),
                           ShadAlert(
                             icon: const Icon(LucideIcons.info, size: 16),

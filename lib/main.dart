@@ -463,10 +463,23 @@ class _KeysTabState extends State<KeysTab> {
     try {
       final keyFiles = await _keyManager.listKeyFiles()
           .timeout(const Duration(seconds: 30));
-      final loadedKeys = await _keyManager.listLoadedKeys()
-          .timeout(const Duration(seconds: 30));
       final authorizedKeys = await _keyManager.listAuthorizedKeys()
           .timeout(const Duration(seconds: 30));
+
+      // Query the agent state first. When it is stopped, `ssh-add -l` would
+      // hang trying to reach the named pipe, so we skip it entirely.
+      SshServiceState agentState;
+      try {
+        agentState = await _serviceManager.checkStatus();
+      } catch (_) {
+        agentState = SshServiceState.stopped;
+      }
+      final agentRunning = agentState == SshServiceState.running;
+
+      final loadedKeys = agentRunning
+          ? await _keyManager.listLoadedKeys()
+              .timeout(const Duration(seconds: 30))
+          : <LoadedKey>[];
 
       final fingerprints = <String, String>{};
       final hasPub = <String, bool>{};
@@ -483,14 +496,6 @@ class _KeysTabState extends State<KeysTab> {
         }
       }
 
-      // The ssh-agent must be running for Load/Unload/Remove All to work.
-      SshServiceState agentState;
-      try {
-        agentState = await _serviceManager.checkStatus();
-      } catch (_) {
-        agentState = SshServiceState.stopped;
-      }
-
       if (!mounted) return;
       setState(() {
         _keyFiles = keyFiles;
@@ -499,7 +504,7 @@ class _KeysTabState extends State<KeysTab> {
         _hasPubKey = hasPub;
         _keyComments = comments;
         _authorizedKeys = authorizedKeys;
-        _agentRunning = agentState == SshServiceState.running;
+        _agentRunning = agentRunning;
         _loading = false;
       });
     } on TimeoutException catch (_) {

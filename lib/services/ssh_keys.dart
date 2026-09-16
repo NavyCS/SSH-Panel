@@ -90,6 +90,12 @@ enum SshKeyErrorCode {
 
   /// The passphrase provided is incorrect for the key.
   wrongPassphrase,
+
+  /// The user profile environment variable is not set.
+  userProfileNotSet,
+
+  /// The provided key line or name is invalid.
+  invalidKeyName,
 }
 
 /// A typed exception thrown by [SshKeyManager] methods.
@@ -134,6 +140,36 @@ class LoadedKey {
 
   @override
   String toString() => 'LoadedKey($type $fingerprint $path)';
+}
+
+// ---------------------------------------------------------------------------
+// Authorized-key model
+// ---------------------------------------------------------------------------
+
+/// A public key entry in `~/.ssh/authorized_keys`.
+class AuthorizedKey {
+  /// Creates an [AuthorizedKey].
+  const AuthorizedKey({
+    required this.type,
+    required this.key,
+    required this.comment,
+    required this.rawLine,
+  });
+
+  /// Key algorithm or format type (e.g. `ssh-ed25519`, `ssh-rsa`).
+  final String type;
+
+  /// Base64 encoded public key string.
+  final String key;
+
+  /// Optional comment or username/host identifier.
+  final String comment;
+
+  /// The original full line from the authorized_keys file.
+  final String rawLine;
+
+  @override
+  String toString() => 'AuthorizedKey($type $comment)';
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +273,9 @@ class SshKeyManager {
     for (final entry in entries) {
       if (entry is! File) continue;
       final name = entry.path.split(Platform.pathSeparator).last;
-      if (name == 'known_hosts' || name == 'config') continue;
+      if (name == 'config') continue;
+      if (name.startsWith('known_hosts')) continue;
+      if (name.startsWith('authorized_keys')) continue;
       // Skip public-key companion files.
       if (name.endsWith('.pub')) continue;
       results.add(entry.path);
@@ -614,4 +652,125 @@ class SshKeyManager {
       );
     }
   }
+
+  // -----------------------------------------------------------------------
+  // authorized_keys management
+  // -----------------------------------------------------------------------
+
+  /// Path to the `authorized_keys` file in `~/.ssh`.
+  String get authorizedKeysPath {
+    final dir = _sshDir;
+    return dir.isEmpty ? '' : '$dir\\authorized_keys';
+  }
+
+  /// Lists parsed public key entries from `~/.ssh/authorized_keys`.
+  ///
+  /// Returns an empty list if the file does not exist or has no valid keys.
+  Future<List<AuthorizedKey>> listAuthorizedKeys() async {
+    final path = authorizedKeysPath;
+    if (path.isEmpty) return [];
+
+    final file = File(path);
+    if (!await file.exists()) return [];
+
+    final lines = await file.readAsLines();
+    final keys = <AuthorizedKey>[];
+
+    for (final rawLine in lines) {
+      final trimmed = rawLine.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+
+      final tokens = trimmed.split(RegExp(r'\s+'));
+      if (tokens.length < 2) continue;
+
+      int typeIndex = -1;
+      for (int i = 0; i < tokens.length; i++) {
+        final token = tokens[i].toLowerCase();
+        if (token.startsWith('ssh-') ||
+            token.startsWith('ecdsa-') ||
+            token.startsWith('sk-ssh-') ||
+            token.startsWith('sk-ecdsa-')) {
+          typeIndex = i;
+          break;
+        }
+      }
+
+      if (typeIndex == -1 || typeIndex + 1 >= tokens.length) {
+        final type = tokens[0];
+        final key = tokens[1];
+        final comment = tokens.length > 2 ? tokens.sublist(2).join(' ') : '';
+        keys.add(AuthorizedKey(
+          type: type,
+          key: key,
+          comment: comment,
+          rawLine: trimmed,
+        ));
+      } else {
+        final type = tokens[typeIndex];
+        final key = tokens[typeIndex + 1];
+        final comment = tokens.length > typeIndex + 2
+            ? tokens.sublist(typeIndex + 2).join(' ')
+            : '';
+        keys.add(AuthorizedKey(
+          type: type,
+          key: key,
+          comment: comment,
+          rawLine: trimmed,
+        ));
+      }
+    }
+
+    return keys;
+  }
+
+  /// Appends a new public key entry to `~/.ssh/authorized_keys`.
+  Future<void> addAuthorizedKey(String keyLine) async {
+    final trimmed = keyLine.trim();
+    if (trimmed.isEmpty) {
+      throw SshKeyException(
+        SshKeyErrorCode.invalidKeyName,
+        'The key line cannot be empty.',
+      );
+    }
+
+    final path = authorizedKeysPath;
+    if (path.isEmpty) {
+      throw SshKeyException(
+        SshKeyErrorCode.userProfileNotSet,
+        'USERPROFILE environment variable is not set.',
+      );
+    }
+
+    final file = File(path);
+    if (!await file.exists()) {
+      await file.create(recursive: true);
+    }
+
+    final existing = await file.readAsString();
+    final needsNewline = existing.isNotEmpty && !existing.endsWith('\n') && !existing.endsWith('\r\n');
+    final sink = file.openWrite(mode: FileMode.append);
+    if (needsNewline) {
+      sink.writeln();
+    }
+    sink.writeln(trimmed);
+    await sink.flush();
+    await sink.close();
+  }
+
+  /// Removes a key entry from `~/.ssh/authorized_keys` matching [rawLine].
+  Future<void> removeAuthorizedKey(String rawLine) async {
+    final path = authorizedKeysPath;
+    if (path.isEmpty) return;
+
+    final file = File(path);
+    if (!await file.exists()) return;
+
+    final lines = await file.readAsLines();
+    final filtered = lines.where((line) => line.trim() != rawLine.trim()).toList();
+
+    await file.writeAsString(
+      filtered.isEmpty ? '' : '${filtered.join(Platform.lineTerminator)}${Platform.lineTerminator}',
+    );
+  }
 }
+

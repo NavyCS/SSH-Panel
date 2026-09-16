@@ -439,6 +439,7 @@ class _KeysTabState extends State<KeysTab> {
   final _keyManager = SshKeyManager();
   List<String> _keyFiles = [];
   List<LoadedKey> _loadedKeys = [];
+  List<AuthorizedKey> _authorizedKeys = [];
   Map<String, String> _keyFingerprints = {};
   bool _loading = false;
   String? _error;
@@ -459,6 +460,8 @@ class _KeysTabState extends State<KeysTab> {
           .timeout(const Duration(seconds: 30));
       final loadedKeys = await _keyManager.listLoadedKeys()
           .timeout(const Duration(seconds: 30));
+      final authorizedKeys = await _keyManager.listAuthorizedKeys()
+          .timeout(const Duration(seconds: 30));
 
       final fingerprints = <String, String>{};
       for (final path in keyFiles) {
@@ -473,6 +476,7 @@ class _KeysTabState extends State<KeysTab> {
         _keyFiles = keyFiles;
         _loadedKeys = loadedKeys;
         _keyFingerprints = fingerprints;
+        _authorizedKeys = authorizedKeys;
         _loading = false;
       });
     } on TimeoutException catch (_) {
@@ -833,6 +837,112 @@ class _KeysTabState extends State<KeysTab> {
     });
   }
 
+  Future<void> _addAuthorizedKeyDialog() async {
+    final keyController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ShadDialog(
+        title: const Text('Add Authorized Key'),
+        description: const Text(
+          'Paste a public key line (e.g. ssh-ed25519 AAAAC3... user@host) to authorize incoming SSH connections.',
+          style: TextStyle(fontSize: 14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: ShadInput(
+            controller: keyController,
+            placeholder: const Text('ssh-ed25519 AAAAC3NzaC1... user@machine'),
+            maxLines: 3,
+            minLines: 2,
+          ),
+        ),
+        actions: [
+          ShadButton.ghost(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ShadButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    final text = keyController.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      await _keyManager.addAuthorizedKey(text);
+      await _refresh();
+    } on SshKeyException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _removeAuthorizedKey(AuthorizedKey key) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ShadDialog(
+        title: const Text('Remove Authorized Key'),
+        description: Text(
+          'Are you sure you want to remove this key (${key.comment.isNotEmpty ? key.comment : key.type}) from authorized_keys?',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          ShadButton.ghost(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ShadButton.destructive(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      await _keyManager.removeAuthorizedKey(key.rawLine);
+      await _refresh();
+    } on SshKeyException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
   Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final isLoaded = _isKeyLoaded(path);
     final canLoad = !_loading && !isLoaded;
@@ -1013,6 +1123,109 @@ class _KeysTabState extends State<KeysTab> {
                                 ],
                               ),
                             ),
+                        ],
+                      ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // ---- Authorized keys card ----
+          ShadCard(
+            title: Row(
+              children: [
+                const Text('Authorized Keys'),
+                const Spacer(),
+                ShadButton.outline(
+                  size: ShadButtonSize.sm,
+                  onPressed: _loading ? null : _addAuthorizedKeyDialog,
+                  child: const Text('Add Key'),
+                ),
+              ],
+            ),
+            description: Text(
+              '${_authorizedKeys.length} authorized key(s) in ~/.ssh/authorized_keys',
+            ),
+            child: _loading
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : _authorizedKeys.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(
+                          'No authorized keys found',
+                          style: theme.textTheme.muted,
+                        ),
+                      )
+                    : Column(
+                        children: [
+                          for (final key in _authorizedKeys)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  ShadBadge.secondary(
+                                    child: Text(key.type),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          key.comment.isNotEmpty
+                                              ? key.comment
+                                              : (key.key.length > 30
+                                                  ? '${key.key.substring(0, 30)}...'
+                                                  : key.key),
+                                          style: theme.textTheme.small,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (key.comment.isNotEmpty)
+                                          Text(
+                                            key.key.length > 40
+                                                ? '${key.key.substring(0, 40)}...'
+                                                : key.key,
+                                            style: theme.textTheme.muted
+                                                .copyWith(fontSize: 11),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  ShadTooltip(
+                                    builder: (context) => const Text(
+                                      'Remove from authorized_keys',
+                                    ),
+                                    child: ShadButton.ghost(
+                                      size: ShadButtonSize.sm,
+                                      onPressed: _loading
+                                          ? null
+                                          : () => _removeAuthorizedKey(key),
+                                      child: const Icon(
+                                        LucideIcons.trash2,
+                                        size: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          const SizedBox(height: 12),
+                          ShadAlert(
+                            icon: const Icon(LucideIcons.info, size: 16),
+                            title: const Text('About Authorized Keys'),
+                            description: const Text(
+                              'Authorized keys define which public keys are permitted to log into this machine via SSH. They are stored in ~/.ssh/authorized_keys.',
+                            ),
+                          ),
                         ],
                       ),
           ),

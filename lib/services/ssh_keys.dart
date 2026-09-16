@@ -558,6 +558,22 @@ class SshKeyManager {
     }
   }
 
+  /// Reads the public key at `$path.pub` and returns its trimmed contents.
+  ///
+  /// Returns `null` if the companion `.pub` file does not exist or cannot be
+  /// read. The returned string is the full public-key line (type, base64,
+  /// comment), trimmed of trailing whitespace.
+  Future<String?> readPublicKey(String path) async {
+    final pubFile = File('$path.pub');
+    if (!await pubFile.exists()) return null;
+    try {
+      final contents = await pubFile.readAsString();
+      return contents.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // -----------------------------------------------------------------------
   // generateKey
   // -----------------------------------------------------------------------

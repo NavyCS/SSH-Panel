@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
@@ -943,7 +944,7 @@ class _KeysTabState extends State<KeysTab> {
     }
   }
 
-  Widget _buildKeyFileRow(ShadThemeData theme, String path) {
+Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final isLoaded = _isKeyLoaded(path);
     final canLoad = !_loading && !isLoaded;
     final canUnload = !_loading && isLoaded;
@@ -963,6 +964,16 @@ class _KeysTabState extends State<KeysTab> {
               style: theme.textTheme.small,
             ),
           ),
+          DisabledActionWrapper(
+            enabled: !_loading,
+            tooltip: 'View public key',
+            child: ShadButton.ghost(
+              size: ShadButtonSize.sm,
+              onPressed: !_loading ? () => _viewPublicKey(path) : null,
+              child: const Text('View'),
+            ),
+          ),
+          const SizedBox(width: 4),
           DisabledActionWrapper(
             enabled: canLoad,
             tooltip: isLoaded
@@ -989,11 +1000,57 @@ class _KeysTabState extends State<KeysTab> {
           DisabledActionWrapper(
             enabled: !_loading,
             tooltip: 'Delete ${_shortPath(path)} and its .pub file',
-child: ShadButton.ghost(
+            child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: !_loading ? () => _deleteKeyFile(path) : null,
               child: const Text('Delete'),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Shows a dialog with the public key for [path], with Copy and Close actions.
+  Future<void> _viewPublicKey(String path) async {
+    final pubKey = await _keyManager.readPublicKey(path);
+    if (pubKey == null || pubKey.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Public key not found for ${_shortPath(path)}.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => ShadDialog(
+        title: Text('Public Key — ${_shortPath(path)}'),
+        description: const Text(
+          'The full public key line, ready to be pasted into '
+          'authorized_keys on a remote host.',
+          style: TextStyle(fontSize: 14),
+        ),
+        child: SelectableText(
+          pubKey,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          ShadButton.ghost(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+          ShadButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: pubKey));
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Copy'),
           ),
         ],
       ),

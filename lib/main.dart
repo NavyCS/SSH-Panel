@@ -990,7 +990,7 @@ class _KeysTabState extends State<KeysTab> {
             builder: (context) => const Text('Delete key file'),
             child: IconButton(
               icon: Icon(
-                LucideIcons.trash2,
+                LucideIcons.trash,
                 size: 18,
                 color: !_loading ? theme.colorScheme.destructive : theme.colorScheme.muted,
               ),

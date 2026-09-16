@@ -543,6 +543,22 @@ class SshKeyManager {
   }
 
   // -----------------------------------------------------------------------
+  // deleteKeyFile
+  // -----------------------------------------------------------------------
+
+  /// Deletes the private key file at [path] and its associated `.pub` companion file from disk.
+  Future<void> deleteKeyFile(String path) async {
+    final file = File(path);
+    if (await file.exists()) {
+      await file.delete();
+    }
+    final pubFile = File('$path.pub');
+    if (await pubFile.exists()) {
+      await pubFile.delete();
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // generateKey
   // -----------------------------------------------------------------------
 

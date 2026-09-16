@@ -440,10 +440,11 @@ class _KeysTabState extends State<KeysTab> {
   final _keyManager = SshKeyManager();
   List<String> _keyFiles = [];
   List<LoadedKey> _loadedKeys = [];
-  List<AuthorizedKey> _authorizedKeys = [];
-  Map<String, String> _keyFingerprints = {};
-  bool _loading = false;
-  String? _error;
+List<AuthorizedKey> _authorizedKeys = [];
+    Map<String, String> _keyFingerprints = {};
+    Map<String, bool> _hasPubKey = {};
+    bool _loading = false;
+    String? _error;
 
   @override
   void initState() {
@@ -465,11 +466,13 @@ class _KeysTabState extends State<KeysTab> {
           .timeout(const Duration(seconds: 30));
 
       final fingerprints = <String, String>{};
+      final hasPub = <String, bool>{};
       for (final path in keyFiles) {
         final fp = await _keyManager.getKeyFingerprint(path);
         if (fp != null) {
           fingerprints[path] = fp;
         }
+        hasPub[path] = await File('$path.pub').exists();
       }
 
       if (!mounted) return;
@@ -477,6 +480,7 @@ class _KeysTabState extends State<KeysTab> {
         _keyFiles = keyFiles;
         _loadedKeys = loadedKeys;
         _keyFingerprints = fingerprints;
+        _hasPubKey = hasPub;
         _authorizedKeys = authorizedKeys;
         _loading = false;
       });
@@ -948,6 +952,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final isLoaded = _isKeyLoaded(path);
     final canLoad = !_loading && !isLoaded;
     final canUnload = !_loading && isLoaded;
+    final hasPub = _hasPubKey[path] ?? false;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -965,11 +970,13 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             ),
           ),
           DisabledActionWrapper(
-            enabled: !_loading,
-            tooltip: 'View public key of ${_shortPath(path)}',
+            enabled: !_loading && hasPub,
+            tooltip: hasPub
+                ? 'View public key of ${_shortPath(path)}'
+                : 'No .pub file for ${_shortPath(path)}',
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
-              onPressed: !_loading ? () => _viewPublicKey(path) : null,
+              onPressed: !_loading && hasPub ? () => _viewPublicKey(path) : null,
               child: const Text('View'),
             ),
           ),

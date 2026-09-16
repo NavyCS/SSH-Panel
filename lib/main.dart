@@ -677,35 +677,32 @@ List<AuthorizedKey> _authorizedKeys = [];
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Algorithm', style: TextStyle(fontSize: 14)),
-              const SizedBox(height: 4),
-              ShadSelect<KeyAlgorithm>(
-                initialValue: algorithm,
-                options: KeyAlgorithm.values.map((algo) {
-                  return ShadOption<KeyAlgorithm>(
-                    value: algo,
-                    child: Text(algo.label),
-                  );
-                }).toList(),
-                selectedOptionBuilder: (context, value) {
-                  return Text(value.label);
-                },
-                onChanged: (value) {
-                  if (value != null) {
-                    setStateDialog(() => algorithm = value);
-                  }
-                },
+              SizedBox(
+                width: double.infinity,
+                child: ShadSelect<KeyAlgorithm>(
+                  initialValue: algorithm,
+                  options: KeyAlgorithm.values.map((algo) {
+                    return ShadOption<KeyAlgorithm>(
+                      value: algo,
+                      child: Text(algo.label),
+                    );
+                  }).toList(),
+                  selectedOptionBuilder: (context, value) {
+                    return Text(value.label);
+                  },
+                  onChanged: (value) {
+                    if (value != null) {
+                      setStateDialog(() => algorithm = value);
+                    }
+                  },
+                ),
               ),
               const SizedBox(height: 12),
-              const Text('Key name', style: TextStyle(fontSize: 14)),
-              const SizedBox(height: 4),
               ShadInput(
                 controller: nameController,
                 placeholder: const Text('Key name (ex. example, id_ed25519)'),
               ),
               const SizedBox(height: 12),
-              const Text('Comment', style: TextStyle(fontSize: 14)),
-              const SizedBox(height: 4),
               ShadInput(
                 controller: commentController,
                 placeholder: const Text('Comment (optional)'),

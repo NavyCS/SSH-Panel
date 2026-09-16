@@ -9,6 +9,13 @@ import 'services/ssh_service.dart';
 import 'services/ssh_keys.dart';
 import 'services/ssh_domains.dart';
 
+/// Shared notifier so the Service tab can signal the Keys tab that the
+/// ssh-agent state changed (started / stopped). The Keys tab listens to this
+/// and refreshes its view so Load/Unload and the Loaded Keys card stay in
+/// sync without switching tabs.
+final ValueNotifier<SshServiceState?> agentServiceState =
+    ValueNotifier<SshServiceState?>(null);
+
 void main() {
   runApp(const SshPanelApp());
 }
@@ -166,6 +173,7 @@ class _ServiceTabState extends State<ServiceTab> {
     });
     try {
       final status = await _serviceManager.checkStatus();
+      agentServiceState.value = status;
       if (!mounted) return;
       setState(() {
         _status = status;
@@ -196,6 +204,8 @@ class _ServiceTabState extends State<ServiceTab> {
     try {
       await _serviceManager.start();
       if (!mounted) return;
+      final status = await _serviceManager.checkStatus();
+      agentServiceState.value = status;
       await _refreshStatus();
     } on SshServiceException catch (e) {
       if (!mounted) return;
@@ -221,6 +231,8 @@ class _ServiceTabState extends State<ServiceTab> {
     try {
       await _serviceManager.stop();
       if (!mounted) return;
+      final status = await _serviceManager.checkStatus();
+      agentServiceState.value = status;
       await _refreshStatus();
     } on SshServiceException catch (e) {
       if (!mounted) return;
@@ -453,6 +465,19 @@ class _KeysTabState extends State<KeysTab> {
   void initState() {
     super.initState();
     _refresh();
+    // When the Service tab starts or stops the agent, refresh this tab so
+    // Load/Unload buttons and the Loaded Keys card stay in sync.
+    agentServiceState.addListener(_onAgentServiceChanged);
+  }
+
+  void _onAgentServiceChanged() {
+    if (mounted) _refresh();
+  }
+
+  @override
+  void dispose() {
+    agentServiceState.removeListener(_onAgentServiceChanged);
+    super.dispose();
   }
 
   Future<void> _refresh() async {

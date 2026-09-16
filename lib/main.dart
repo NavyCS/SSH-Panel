@@ -992,7 +992,11 @@ class _KeysTabState extends State<KeysTab> {
             child: ShadButton.ghost(
               size: ShadButtonSize.sm,
               onPressed: !_loading ? () => _deleteKeyFile(path) : null,
-              child: const Icon(LucideIcons.trash2, size: 14),
+              child: Icon(
+                LucideIcons.trash2,
+                size: 14,
+                color: theme.colorScheme.destructive,
+              ),
             ),
           ),
         ],

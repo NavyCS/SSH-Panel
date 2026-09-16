@@ -989,14 +989,13 @@ class _KeysTabState extends State<KeysTab> {
           DisabledActionWrapper(
             enabled: !_loading,
             tooltip: 'Delete ${_shortPath(path)} and its .pub file',
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: !_loading ? () => _deleteKeyFile(path) : null,
-              child: Icon(
+            child: ShadIconButton(
+              iconSize: 18,
+              icon: Icon(
                 LucideIcons.trash2,
-                size: 14,
                 color: theme.colorScheme.destructive,
               ),
+              onPressed: !_loading ? () => _deleteKeyFile(path) : null,
             ),
           ),
         ],

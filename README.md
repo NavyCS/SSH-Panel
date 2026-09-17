@@ -9,9 +9,11 @@ library. Service control goes through the Windows Service Control Manager via
 set with `sc.exe` (a documented gap — `win32` cannot change the start type).
 Packaged as an MSIX with the `winapp` CLI.
 
-**Always runs elevated** — `windows/runner/app.manifest` declares
-`requireAdministrator`, and `Package.appxmanifest` declares the `allowElevation`
-capability, so the app controls the service without a repeated UAC prompt.
+**On-demand elevation** — `windows/runner/app.manifest` declares
+`asInvoker`, and `Package.appxmanifest` declares the `allowElevation`
+capability. The app starts without elevation and requests admin via a single
+UAC prompt (using `ShellExecute("runas")`) only when you click Start, Stop,
+or change the startup type.
 
 ## Features
 
@@ -47,7 +49,7 @@ SSHPanel/
 │       ├── ssh_check.dart     # OpenSSH presence detection
 │       ├── ssh_keys.dart      # SshKeyManager — ssh-keygen / ssh-add
 │       └── ssh_domains.dart   # SshConfigManager — ~/.ssh/config + known_hosts
-├── windows/runner/app.manifest   # requireAdministrator
+├── windows/runner/app.manifest   # asInvoker with on-demand ShellExecute("runas") elevation
 ├── Package.appxmanifest          # allowElevation + runFullTrust
 ├── winapp.yaml
 ├── dist/                         # built MSIX

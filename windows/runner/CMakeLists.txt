@@ -31,12 +31,10 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
 # Flutter's toolchain injects /MANIFESTUAC:"level='asInvoker'..." on the link line.
-# The app needs requireAdministrator (it talks to the SCM), so the injected
-# snippet must match the level declared in runner.exe.manifest — otherwise
-# mt.exe aborts with "Values of attribute 'level' not equal in different
-# manifest snippets".
+# The runner.exe.manifest also declares asInvoker — both must match or mt.exe
+# aborts with "Values of attribute 'level' not equal in different manifest snippets".
 target_link_options(${BINARY_NAME} PRIVATE
-  "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
+  "/MANIFESTUAC:level='asInvoker' uiAccess='false'"
 )
 
 # Add dependency libraries and include directories. Add any application-specific

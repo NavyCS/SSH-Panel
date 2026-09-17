@@ -335,24 +335,25 @@ class SshServiceManager {
   }
 
   // -----------------------------------------------------------------------
-  // On-demand elevation
+  // Elevated execution helper
   // -----------------------------------------------------------------------
 
-  /// Relaunches the current executable with administrator rights via
-  /// `ShellExecute` `runas` verb. Returns `true` if the user accepted the
-  /// UAC prompt (result > 32), `false` otherwise.
-  bool _launchElevated(String args) {
-    return using((arena) {
-      final result = ShellExecute(
-        null,
-        arena.pcwstr('runas'),
-        arena.pcwstr(Platform.resolvedExecutable),
-        arena.pcwstr(args),
-        null,
-        SW_SHOWNORMAL,
+  /// Runs an `sc.exe` command with administrator privileges via UAC
+  /// for `modePerAction` elevation. Waits for execution to finish.
+  Future<void> _runElevatedSc(String scArgs) async {
+    final result = await Process.run('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Start-Process sc.exe -ArgumentList "$scArgs" -Verb RunAs -Wait -WindowStyle Hidden',
+    ]);
+    if (result.exitCode != 0) {
+      throw SshServiceException(
+        SshServiceErrorCode.accessDenied,
+        'Administrator permissions were not granted (UAC cancelled or denied).',
+        rawDetail: result.stderr.toString(),
       );
-      return result.address > 32;
-    });
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -448,7 +449,11 @@ class SshServiceManager {
     return await _waitForAgentPipe();
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--start-service')) return false;
+      final mode = await SettingsService.getElevationMode();
+      if (mode == SettingsService.modePerAction) {
+        await _runElevatedSc('start $_kServiceName');
+        return await _waitForAgentPipe();
+      }
       rethrow;
     }
   }
@@ -534,15 +539,42 @@ class SshServiceManager {
       }
 
       await Future<void>.delayed(const Duration(milliseconds: 300));
-      throw SshServiceException(
-        SshServiceErrorCode.timeout,
-        'Service did not reach STOPPED within 30 seconds.',
-      );
     }
+
+    throw SshServiceException(
+      SshServiceErrorCode.timeout,
+      'Service did not reach STOPPED within 30 seconds.',
+    );
 
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--stop-service')) return;
+      final mode = await SettingsService.getElevationMode();
+      if (mode == SettingsService.modePerAction) {
+        await _runElevatedSc('stop $_kServiceName');
+        // Poll until stopped or timeout
+        final deadline = DateTime.now().add(const Duration(seconds: 30));
+        while (DateTime.now().isBefore(deadline)) {
+          final scm = _openScm();
+          SshServiceState state;
+          try {
+            final svc = _openService(scm, SERVICE_QUERY_STATUS);
+            try {
+              state = _queryServiceState(svc);
+            } finally {
+              svc.close();
+            }
+          } finally {
+            scm.close();
+          }
+
+          if (state == SshServiceState.stopped) {
+            return;
+          }
+
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+        }
+        return;
+      }
       rethrow;
     }
   }
@@ -588,7 +620,11 @@ class SshServiceManager {
       }
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--set-startup=$startArg')) return;
+      final mode = await SettingsService.getElevationMode();
+      if (mode == SettingsService.modePerAction) {
+        await _runElevatedSc('config $_kServiceName start= $startArg');
+        return;
+      }
       rethrow;
     }
   }

@@ -121,16 +121,19 @@ class SshServiceException implements Exception {
 // Synchronous FFI helpers (called inside using() blocks)
 // ---------------------------------------------------------------------------
 
-/// Opens the SCM with `SC_MANAGER_ALL_ACCESS`.
-///
-/// Returns the SCM handle. Caller must close it.
-///
-/// Throws a typed [SshServiceException] carrying the Windows error code in
-/// [SshServiceException.rawDetail] (surfaced by [SshServiceException.toString])
-/// so the UI can show *why* the SCM could not be opened instead of a bare
-/// "Failed to open the Service Control Manager." with no clue.
-SC_HANDLE _openScm() {
-  final result = OpenSCManager(null, null, SC_MANAGER_ALL_ACCESS);
+/// Opens the SCM with `SC_MANAGER_CONNECT` (minimal access, no admin needed).
+  ///
+  /// Returns the SCM handle. Caller must close it.
+  ///
+  /// Throws a typed [SshServiceException] carrying the Windows error code in
+  /// [SshServiceException.rawDetail] (surfaced by [SshServiceException.toString])
+  /// so the UI can show *why* the SCM could not be opened instead of a bare
+  /// "Failed to open the Service Control Manager." with no clue.
+  SC_HANDLE _openScm() {
+    // SC_MANAGER_CONNECT = 0x0001 — enough to enumerate/query services
+    // without admin rights. Only start/stop/setStartupType need elevation.
+    const int scmAccess = 0x0001; // SC_MANAGER_CONNECT
+    final result = OpenSCManager(null, null, scmAccess);
   if (result.error.isError) {
     final code = result.error.code;
     final hint = _scmFailureHint(code);
@@ -330,6 +333,27 @@ class SshServiceManager {
   }
 
   // -----------------------------------------------------------------------
+  // On-demand elevation
+  // -----------------------------------------------------------------------
+
+  /// Relaunches the current executable with administrator rights via
+  /// `ShellExecute` `runas` verb. Returns `true` if the user accepted the
+  /// UAC prompt (result > 32), `false` otherwise.
+  bool _launchElevated(String args) {
+    return using((arena) {
+      final result = ShellExecute(
+        null,
+        arena.pcwstr('runas'),
+        arena.pcwstr(Platform.resolvedExecutable),
+        arena.pcwstr(args),
+        null,
+        SW_SHOWNORMAL,
+      );
+      return result.address > 32;
+    });
+  }
+
+  // -----------------------------------------------------------------------
   // start
   // -----------------------------------------------------------------------
 
@@ -340,28 +364,30 @@ class SshServiceManager {
   Future<bool> start() async {
     await _assertPresence();
 
-    // Phase 1: Issue StartService (synchronous FFI).
-    {
-      final scm = _openScm();
-      try {
-        final svc = _openService(scm, SERVICE_START);
+    // On access denied, re-launch elevated and exit immediately.
+    try {
+      // Phase 1: Issue StartService (synchronous FFI).
+      {
+        final scm = _openScm();
         try {
-          final err = _startServiceRaw(svc);
-          // ERROR_SERVICE_ALREADY_RUNNING (1056) is not fatal.
-          if (err != 0 && err != 1056) {
-            throw SshServiceException(
-              SshServiceErrorCode.operationFailed,
-              'StartService failed.',
-              rawDetail: 'error $err',
-            );
+          final svc = _openService(scm, SERVICE_START);
+          try {
+            final err = _startServiceRaw(svc);
+            // ERROR_SERVICE_ALREADY_RUNNING (1056) is not fatal.
+            if (err != 0 && err != 1056) {
+              throw SshServiceException(
+                SshServiceErrorCode.operationFailed,
+                'StartService failed.',
+                rawDetail: 'error $err',
+              );
+            }
+          } finally {
+            svc.close();
           }
         } finally {
-          svc.close();
+          scm.close();
         }
-      } finally {
-        scm.close();
       }
-    }
 
     // Phase 2: Poll until SERVICE_RUNNING or timeout (async loop, sync FFI).
     final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -418,6 +444,11 @@ class SshServiceManager {
 
     // Service reports RUNNING — now verify the named-pipe is reachable.
     return await _waitForAgentPipe();
+    } on SshServiceException catch (e) {
+      if (e.code != SshServiceErrorCode.accessDenied) rethrow;
+      if (_launchElevated('--start-service')) exit(0);
+      rethrow;
+    }
   }
 
   /// Polls `ssh-add -l` with exponential back-off until the agent pipe is
@@ -455,28 +486,30 @@ class SshServiceManager {
   Future<bool> stop() async {
     await _assertPresence();
 
-    // Phase 1: Issue ControlService(STOP) (synchronous FFI).
-    {
-      final scm = _openScm();
-      try {
-        final svc = _openService(scm, SERVICE_STOP | SERVICE_QUERY_STATUS);
+    // On access denied, re-launch elevated and exit immediately.
+    try {
+      // Phase 1: Issue ControlService(STOP) (synchronous FFI).
+      {
+        final scm = _openScm();
         try {
-          final err = _controlService(svc, SERVICE_CONTROL_STOP);
-          // ERROR_SERVICE_NOT_ACTIVE (1062) = already stopped — not fatal.
-          if (err != 0 && err != 1062) {
-            throw SshServiceException(
-              SshServiceErrorCode.operationFailed,
-              'ControlService (STOP) failed.',
-              rawDetail: 'error $err',
-            );
+          final svc = _openService(scm, SERVICE_STOP | SERVICE_QUERY_STATUS);
+          try {
+            final err = _controlService(svc, SERVICE_CONTROL_STOP);
+            // ERROR_SERVICE_NOT_ACTIVE (1062) = already stopped — not fatal.
+            if (err != 0 && err != 1062) {
+              throw SshServiceException(
+                SshServiceErrorCode.operationFailed,
+                'ControlService (STOP) failed.',
+                rawDetail: 'error $err',
+              );
+            }
+          } finally {
+            svc.close();
           }
         } finally {
-          svc.close();
+          scm.close();
         }
-      } finally {
-        scm.close();
       }
-    }
 
     // Phase 2: Poll until SERVICE_STOPPED or timeout (async loop, sync FFI).
     final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -505,6 +538,11 @@ class SshServiceManager {
       SshServiceErrorCode.timeout,
       'Service did not reach STOPPED within 30 seconds.',
     );
+    } on SshServiceException catch (e) {
+      if (e.code != SshServiceErrorCode.accessDenied) rethrow;
+      if (_launchElevated('--stop-service')) exit(0);
+      rethrow;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -525,17 +563,31 @@ class SshServiceManager {
       StartupType.disabled => 'disabled',
     };
 
-    final result = await Process.run(
-      'sc.exe',
-      ['config', _kServiceName, 'start=', startArg],
-    );
-
-    if (result.exitCode != 0) {
-      throw SshServiceException(
-        SshServiceErrorCode.scCommandFailed,
-        'sc.exe config failed (exit code ${result.exitCode}).',
-        rawDetail: '${result.stdout}\n${result.stderr}',
+    // On access denied (exit code 5 = ERROR_ACCESS_DENIED),
+    // throw accessDenied so the caller can trigger elevation.
+    try {
+      final result = await Process.run(
+        'sc.exe',
+        ['config', _kServiceName, 'start=', startArg],
       );
+
+      if (result.exitCode != 0) {
+        if (result.exitCode == 5) {
+          throw SshServiceException(
+            SshServiceErrorCode.accessDenied,
+            'sc.exe config failed: access denied (not elevated).',
+          );
+        }
+        throw SshServiceException(
+          SshServiceErrorCode.scCommandFailed,
+          'sc.exe config failed (exit code ${result.exitCode}).',
+          rawDetail: '${result.stdout}\n${result.stderr}',
+        );
+      }
+    } on SshServiceException catch (e) {
+      if (e.code != SshServiceErrorCode.accessDenied) rethrow;
+      if (_launchElevated('--set-startup=$startArg')) exit(0);
+      rethrow;
     }
   }
 

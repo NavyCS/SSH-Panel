@@ -490,7 +490,7 @@ class _ServiceTabState extends State<ServiceTab> {
                                     ),
                                     if (!isElevated && !isOnceMode) ...[
                                       const SizedBox(width: 4),
-                                      const Icon(LucideIcons.shield, size: 12),
+                                      const Icon(LucideIcons.shield, size: 14),
                                     ],
                                     const SizedBox(width: 6),
                                     const Text('Stop'),

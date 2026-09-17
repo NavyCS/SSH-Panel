@@ -16,6 +16,8 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
+import 'settings_service.dart';
+
 // ---------------------------------------------------------------------------
 // Service name constant
 // ---------------------------------------------------------------------------
@@ -446,7 +448,7 @@ class SshServiceManager {
     return await _waitForAgentPipe();
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--start-service')) exit(0);
+      if (_launchElevated('--start-service')) return false;
       rethrow;
     }
   }
@@ -483,7 +485,7 @@ class SshServiceManager {
   // -----------------------------------------------------------------------
 
   /// Stops the `ssh-agent` service and polls until it reports STOPPED.
-  Future<bool> stop() async {
+  Future<void> stop() async {
     await _assertPresence();
 
     // On access denied, re-launch elevated and exit immediately.
@@ -528,19 +530,19 @@ class SshServiceManager {
       }
 
       if (state == SshServiceState.stopped) {
-        return true;
+        return;
       }
 
       await Future<void>.delayed(const Duration(milliseconds: 300));
+      throw SshServiceException(
+        SshServiceErrorCode.timeout,
+        'Service did not reach STOPPED within 30 seconds.',
+      );
     }
 
-    throw SshServiceException(
-      SshServiceErrorCode.timeout,
-      'Service did not reach STOPPED within 30 seconds.',
-    );
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--stop-service')) exit(0);
+      if (_launchElevated('--stop-service')) return;
       rethrow;
     }
   }
@@ -586,7 +588,7 @@ class SshServiceManager {
       }
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
-      if (_launchElevated('--set-startup=$startArg')) exit(0);
+      if (_launchElevated('--set-startup=$startArg')) return;
       rethrow;
     }
   }

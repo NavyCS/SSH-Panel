@@ -3,8 +3,11 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:win32/win32.dart';
+import 'package:ffi/ffi.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'services/settings_service.dart';
 import 'services/ssh_service.dart';
 import 'services/ssh_keys.dart';
 import 'services/ssh_domains.dart';
@@ -16,20 +19,29 @@ import 'services/ssh_domains.dart';
 final ValueNotifier<SshServiceState?> agentServiceState =
     ValueNotifier<SshServiceState?>(null);
 
-void main() {
-  // ---------------------------------------------------------------------------
-  // Elevated CLI path — when the app is re-launched with admin rights it
-  // receives one of the following flags to perform a service operation and
-  // exit silently without showing the full UI.
-  // ---------------------------------------------------------------------------
+void main() async {
   final args = Platform.executableArguments;
 
+  // Hide the window immediately for elevated CLI operations.
+  // ShellExecute("runas") needs SW_SHOWNORMAL for the UAC prompt to appear,
+  // so we hide the window ourselves right after launch.
+  if (args.contains('--start-service') ||
+      args.contains('--stop-service') ||
+      args.any((a) => a.startsWith('--set-startup='))) {
+    using((arena) {
+      final hwnd = GetForegroundWindow();
+      if (hwnd != 0) {
+        ShowWindow(hwnd, SW_HIDE);
+      }
+    });
+  }
+
   if (args.contains('--start-service')) {
-    _runElevatedServiceOp(() => SshServiceManager().start());
+    await _runElevatedServiceOp(() => SshServiceManager().start());
     return;
   }
   if (args.contains('--stop-service')) {
-    _runElevatedServiceOp(() => SshServiceManager().stop());
+    await _runElevatedServiceOp(() => SshServiceManager().stop());
     return;
   }
   final setStartupArg =
@@ -42,7 +54,7 @@ void main() {
           '(expected automatic, manual, or disabled)');
       exit(1);
     }
-    _runElevatedServiceOp(() => SshServiceManager().setStartupType(type));
+    await _runElevatedServiceOp(() => SshServiceManager().setStartupType(type));
     return;
   }
 
@@ -52,11 +64,18 @@ void main() {
   runApp(const SshPanelApp());
 }
 
-/// Performs a service operation launched from an elevated process, prints any
-/// error to stderr, and exits with the appropriate code.
+/// Performs a service operation launched from an elevated process.
+/// In "Once" mode, stays running as the elevated app for the session.
+/// In "Per action" mode, exits after completing the operation.
 Future<void> _runElevatedServiceOp(Future<void> Function() op) async {
   try {
     await op();
+    final mode = await SettingsService.getElevationMode();
+    if (mode == SettingsService.modeOnce) {
+      // Stay running as the elevated app — show the UI.
+      runApp(const SshPanelApp());
+      return;
+    }
     exit(0);
   } catch (e) {
     stderr.writeln('$e');
@@ -93,11 +112,89 @@ class SshPanelShell extends StatefulWidget {
 
 class _SshPanelShellState extends State<SshPanelShell> {
   late final ShadTabsController<String> _tabsController;
+  String _elevationMode = 'per_action';
 
   @override
   void initState() {
     super.initState();
     _tabsController = ShadTabsController<String>(value: 'service');
+    _loadElevationMode();
+  }
+
+  Future<void> _loadElevationMode() async {
+    final mode = await SettingsService.getElevationMode();
+    if (mounted) {
+      setState(() => _elevationMode = mode);
+    }
+  }
+
+  void _showSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateDialog) => ShadDialog(
+          title: const Text('Settings'),
+          description: const Text('Choose your elevation mode.'),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ShadSelect<String>(
+                initialValue: _elevationMode,
+                options: [
+                  ShadOption<String>(
+                    value: SettingsService.modePerAction,
+                    child: const Text('Per action'),
+                  ),
+                  ShadOption<String>(
+                    value: SettingsService.modeOnce,
+                    child: const Text('Once'),
+                  ),
+                ],
+                selectedOptionBuilder: (context, value) {
+                  return Text(
+                    value == SettingsService.modePerAction
+                        ? 'Per action'
+                        : 'Once',
+                  );
+                },
+                onChanged: (value) async {
+                  if (value != null) {
+                    await SettingsService.setElevationMode(value);
+                    if (mounted) {
+                      setState(() => _elevationMode = value);
+                    }
+                    setStateDialog(() {});
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              if (_isElevated)
+                const ShadAlert(
+                  icon: Icon(LucideIcons.shield),
+                  title: Text('Admin mode'),
+                  description: Text(
+                    'This app is running with administrator privileges. '
+                    'It will stay elevated for the session.',
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool get _isElevated {
+    final args = Platform.executableArguments;
+    return args.contains('--start-service') ||
+        args.contains('--stop-service') ||
+        args.any((a) => a.startsWith('--set-startup='));
   }
 
   @override
@@ -109,6 +206,7 @@ class _SshPanelShellState extends State<SshPanelShell> {
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
+    final isAdminMode = _isElevated;
 
     return Column(
       children: [
@@ -133,6 +231,31 @@ class _SshPanelShellState extends State<SshPanelShell> {
               Text(
                 'SSH Panel',
                 style: theme.textTheme.h3,
+              ),
+              const Spacer(),
+              if (isAdminMode) ...[
+                ShadBadge(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(LucideIcons.shield, size: 12),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Admin',
+                        style: theme.textTheme.small,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              ShadTooltip(
+                builder: (context) => const Text('Settings'),
+                child: ShadIconButton(
+                  icon: const Icon(LucideIcons.settings),
+                  iconSize: 18,
+                  onPressed: _showSettingsDialog,
+                ),
               ),
             ],
           ),
@@ -228,8 +351,8 @@ class _ServiceTabState extends State<ServiceTab> {
     return switch (e.code) {
       SshServiceErrorCode.accessDenied =>
         'Administrator permissions are required to perform this action. '
-        'A UAC prompt will appear when trying to stop the service '
-        'or change the startup type.',
+        'Try switching to "Once" mode in Settings to keep the helper elevated '
+        'for the session, or allow the UAC prompt.',
       SshServiceErrorCode.serviceNotFound => e.message,
       SshServiceErrorCode.opensshNotInstalled => e.message,
       _ => e.toString(),
@@ -374,15 +497,36 @@ class _ServiceTabState extends State<ServiceTab> {
                         children: [
                           ShadButton(
                             onPressed: _loading ? null : _startService,
-                            child: const Text('Start'),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.play, size: 14),
+                                const SizedBox(width: 6),
+                                const Text('Start'),
+                              ],
+                            ),
                           ),
                           ShadButton.destructive(
                             onPressed: _loading ? null : _stopService,
-                            child: const Text('Stop'),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(LucideIcons.stopCircle, size: 14),
+                                const SizedBox(width: 6),
+                                const Text('Stop'),
+                              ],
+                            ),
                           ),
                           ShadButton.outline(
                             onPressed: _loading ? null : _refreshStatus,
-                            child: const Text('Refresh'),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(LucideIcons.refreshCw, size: 14),
+                                SizedBox(width: 6),
+                                Text('Refresh'),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -397,31 +541,47 @@ class _ServiceTabState extends State<ServiceTab> {
             builder: (context, constraints) => ShadCard(
               width: constraints.maxWidth,
               title: const Text('Startup Type'),
-              description: const Text(
-                'Configure how the ssh-agent service starts with Windows',
-              ),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: ShadSelect<StartupType>(
-                  initialValue: _startupType,
-                  options: StartupType.values.map((type) {
-                    final label =
-                        type.name[0].toUpperCase() + type.name.substring(1);
-                    return ShadOption<StartupType>(
-                      value: type,
-                      child: Text(label),
-                    );
-                  }).toList(),
-                  selectedOptionBuilder: (context, value) {
-                    return Text(
-                      value.name[0].toUpperCase() + value.name.substring(1),
-                    );
-                  },
-                  onChanged: (value) {
-                    if (value != null) _setStartupType(value);
-                  },
-                ),
-              ),
+               description: const Text(
+                 'Configure how the ssh-agent service starts with Windows',
+               ),
+               child: Padding(
+                 padding: const EdgeInsets.only(top: 12),
+                 child: ShadSelect<StartupType>(
+                   initialValue: _startupType,
+                   options: StartupType.values.map((type) {
+                     final label =
+                         type.name[0].toUpperCase() + type.name.substring(1);
+                     return ShadOption<StartupType>(
+                       value: type,
+                       child: Row(
+                         mainAxisSize: MainAxisSize.min,
+                         children: [
+                           if (type != StartupType.manual)
+                             const Icon(LucideIcons.lock, size: 12),
+                           const SizedBox(width: 4),
+                           Text(label),
+                         ],
+                       ),
+                     );
+                   }).toList(),
+                   selectedOptionBuilder: (context, value) {
+                     return Row(
+                       mainAxisSize: MainAxisSize.min,
+                       children: [
+                         if (value != StartupType.manual)
+                           const Icon(LucideIcons.lock, size: 12),
+                         const SizedBox(width: 4),
+                         Text(
+                           value.name[0].toUpperCase() + value.name.substring(1),
+                         ),
+                       ],
+                     );
+                   },
+                   onChanged: (value) {
+                     if (value != null) _setStartupType(value);
+                   },
+                 ),
+               ),
             ),
           ),
         ],

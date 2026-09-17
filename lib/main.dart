@@ -17,20 +17,51 @@ final ValueNotifier<SshServiceState?> agentServiceState =
     ValueNotifier<SshServiceState?>(null);
 
 void main() {
+  // ---------------------------------------------------------------------------
+  // Elevated CLI path — when the app is re-launched with admin rights it
+  // receives one of the following flags to perform a service operation and
+  // exit silently without showing the full UI.
+  // ---------------------------------------------------------------------------
+  final args = Platform.executableArguments;
+
+  if (args.contains('--start-service')) {
+    _runElevatedServiceOp(() => SshServiceManager().start());
+    return;
+  }
+  if (args.contains('--stop-service')) {
+    _runElevatedServiceOp(() => SshServiceManager().stop());
+    return;
+  }
+  final setStartupArg =
+      args.where((a) => a.startsWith('--set-startup=')).toList();
+  if (setStartupArg.isNotEmpty) {
+    final value = setStartupArg.first.split('=').last;
+    final type = StartupType.values.asNameMap()[value];
+    if (type == null) {
+      stderr.writeln('Unknown startup type: $value '
+          '(expected automatic, manual, or disabled)');
+      exit(1);
+    }
+    _runElevatedServiceOp(() => SshServiceManager().setStartupType(type));
+    return;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Normal UI path — no CLI flags, run the Flutter app.
+  // ---------------------------------------------------------------------------
   runApp(const SshPanelApp());
 }
 
-/// Renders a service error for the UI. [SshServiceException.accessDenied]
-/// is the one case where the user can actually *do* something — the app was
-/// launched without elevation — so it gets a specific instruction instead of
-/// a generic red banner.
-String _serviceErrorText(SshServiceException e) {
-  if (e.code == SshServiceErrorCode.accessDenied) {
-    return 'SSH Panel is not running as administrator, so it cannot control '
-        'the ssh-agent service. Reinstall the MSIX and launch the app once — '
-        'it will ask for elevation.';
+/// Performs a service operation launched from an elevated process, prints any
+/// error to stderr, and exits with the appropriate code.
+Future<void> _runElevatedServiceOp(Future<void> Function() op) async {
+  try {
+    await op();
+    exit(0);
+  } catch (e) {
+    stderr.writeln('$e');
+    exit(1);
   }
-  return e.toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +188,6 @@ class _ServiceTabState extends State<ServiceTab> {
   final _serviceManager = SshServiceManager();
   SshServiceState? _status;
   bool _loading = false;
-  String? _error;
   StartupType _startupType = StartupType.manual;
 
   @override
@@ -166,10 +196,49 @@ class _ServiceTabState extends State<ServiceTab> {
     _refreshStatus();
   }
 
+  /// Shows a non-blocking error toast. Keeps all controls visible.
+  void _showToast(SshServiceException e) {
+    final contextRef = context;
+    // Defer to next frame so ShadToaster is available.
+    Future.microtask(() {
+      if (!mounted) return;
+      ShadToaster.of(contextRef).show(
+        ShadToast.destructive(
+          title: Text(_toastTitle(e)),
+          description: Text(_toastDescription(e)),
+          action: ShadButton.destructive(
+            child: const Text('Dismiss'),
+            onPressed: () => ShadToaster.of(contextRef).hide(),
+          ),
+        ),
+      );
+    });
+  }
+
+  String _toastTitle(SshServiceException e) {
+    return switch (e.code) {
+      SshServiceErrorCode.accessDenied => 'Administrator required',
+      SshServiceErrorCode.serviceNotFound => 'Service not found',
+      SshServiceErrorCode.opensshNotInstalled => 'OpenSSH not installed',
+      _ => 'Service error',
+    };
+  }
+
+  String _toastDescription(SshServiceException e) {
+    return switch (e.code) {
+      SshServiceErrorCode.accessDenied =>
+        'Administrator permissions are required to perform this action. '
+        'A UAC prompt will appear when trying to stop the service '
+        'or change the startup type.',
+      SshServiceErrorCode.serviceNotFound => e.message,
+      SshServiceErrorCode.opensshNotInstalled => e.message,
+      _ => e.toString(),
+    };
+  }
+
   Future<void> _refreshStatus() async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       final status = await _serviceManager.checkStatus();
@@ -181,26 +250,19 @@ class _ServiceTabState extends State<ServiceTab> {
       });
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(e);
-        _loading = false;
-      });
+      _showToast(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(e is SshServiceException
-            ? e
-            : SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
-        _loading = false;
-      });
+      _showToast(e is SshServiceException
+          ? e
+          : SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _startService() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
       await _serviceManager.start();
       if (!mounted) return;
@@ -209,25 +271,17 @@ class _ServiceTabState extends State<ServiceTab> {
       await _refreshStatus();
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(e);
-        _loading = false;
-      });
+      _showToast(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(SshServiceException(
-            SshServiceErrorCode.operationFailed, e.toString()));
-        _loading = false;
-      });
+      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _stopService() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
       await _serviceManager.stop();
       if (!mounted) return;
@@ -236,45 +290,30 @@ class _ServiceTabState extends State<ServiceTab> {
       await _refreshStatus();
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(e);
-        _loading = false;
-      });
+      _showToast(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(SshServiceException(
-            SshServiceErrorCode.operationFailed, e.toString()));
-        _loading = false;
-      });
+      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _setStartupType(StartupType type) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    final originalType = _startupType;
+    setState(() { _startupType = type; _loading = true; });
     try {
       await _serviceManager.setStartupType(type);
       if (!mounted) return;
-      setState(() {
-        _startupType = type;
-        _loading = false;
-      });
+      setState(() => _loading = false);
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(e);
-        _loading = false;
-      });
+      _showToast(e);
+      setState(() { _startupType = originalType; _loading = false; });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = _serviceErrorText(SshServiceException(
-            SshServiceErrorCode.operationFailed, e.toString()));
-        _loading = false;
-      });
+      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      setState(() { _startupType = originalType; _loading = false; });
     }
   }
 
@@ -304,7 +343,7 @@ class _ServiceTabState extends State<ServiceTab> {
                 children: [
                   const Text('Agent Status'),
                   const SizedBox(width: 8),
-                  if (!_loading && _error == null)
+                  if (!_loading)
                     ShadBadge(
                       child: Text(
                         _status != null
@@ -329,29 +368,24 @@ class _ServiceTabState extends State<ServiceTab> {
                           Text('Loading...', style: theme.textTheme.muted),
                         ],
                       )
-                    : _error != null
-                        ? ShadAlert.destructive(
-                            title: const Text('Error'),
-                            description: Text(_error!),
-                          )
-                        : Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              ShadButton(
-                                onPressed: _loading ? null : _startService,
-                                child: const Text('Start'),
-                              ),
-                              ShadButton.destructive(
-                                onPressed: _loading ? null : _stopService,
-                                child: const Text('Stop'),
-                              ),
-                              ShadButton.outline(
-                                onPressed: _loading ? null : _refreshStatus,
-                                child: const Text('Refresh'),
-                              ),
-                            ],
+                    : Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          ShadButton(
+                            onPressed: _loading ? null : _startService,
+                            child: const Text('Start'),
                           ),
+                          ShadButton.destructive(
+                            onPressed: _loading ? null : _stopService,
+                            child: const Text('Stop'),
+                          ),
+                          ShadButton.outline(
+                            onPressed: _loading ? null : _refreshStatus,
+                            child: const Text('Refresh'),
+                          ),
+                        ],
+                      ),
               ),
             ),
           ),

@@ -64,3 +64,6 @@ dist/
 .metadata
 .omo/
 *.evb
+
+# Loam
+loam-report*.json

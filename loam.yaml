@@ -1,0 +1,78 @@
+# loam.yaml — loam.dev configuration
+#
+# loam.dev: Codebase intelligence & anti-AI-slop for Dart/Flutter.
+# CLI: loam  |  Docs: https://github.com/silvio-l/loam
+#
+# This file is optional — loam works out-of-the-box without it (Zero-Config).
+# All options below are shown with their defaults; uncomment to override.
+#
+# Discovery: loam searches for loam.yaml by walking up from the analysed
+# project root to the enclosing git repository root (like analysis_options.yaml).
+# In a monorepo, a repo-root loam.yaml provides shared defaults and a nearer
+# (per-package) loam.yaml layers on top of it (nearer wins; ignore lists are
+# additive). See docs/developer-guide.md → "Configuration & discovery".
+#
+# Schema: https://github.com/silvio-l/loam (see docs/PRD.md)
+
+# ---------------------------------------------------------------------------
+# update_check — opt out of the update-availability notice (bool, default true)
+#
+# true  = loam checks for a new version once per 24 h and prints a notice on
+#         stderr when a newer version is available (default, Zero-Config).
+# false = disable the check repo-wide (e.g. for offline or corporate setups).
+#
+# The full opt-out precedence chain:
+#   --no-update-check (CLI) > LOAM_NO_UPDATE_CHECK (env) > update_check: false
+# ---------------------------------------------------------------------------
+# update_check: true
+
+# ---------------------------------------------------------------------------
+# a11y — include accessibility-category rules in `loam scan` (bool, default true)
+#
+# true  = accessibility rules run as part of `loam scan` (default, Zero-Config).
+# false = exclude all accessibility-category rules from `loam scan`.
+#         Equivalent to passing --no-a11y on the command line.
+#         Use `loam a11y` to run accessibility checks in isolation.
+# ---------------------------------------------------------------------------
+# a11y: true
+
+# ---------------------------------------------------------------------------
+# rules — per-rule on/off switches (ruleId: true/false)
+#
+# true  = rule is active (default for every rule).
+# false = rule is disabled; its findings are suppressed before any gate check.
+#
+# Tip: run `loam scan` to see which rules are active in your project.
+# ---------------------------------------------------------------------------
+rules:
+  # Suppress a specific rule project-wide:
+  #   unused-public-exports: false
+
+# ---------------------------------------------------------------------------
+# source_dirs — top-level directories treated as production source for the
+# universal complexity scan (complexity-hotspots, `loam health`).
+#
+# Default: [lib, bin] — hand-written, shipping Dart code. Generated files
+# (*.g.dart, gen-l10n output, …) are ALWAYS excluded regardless of this list.
+#
+# Deliberately NOT included by default (override here if you want them):
+#   test, integration_test, test_driver  — intentionally high complexity
+#   example, tool, benchmark             — demo / dev-only code
+#
+# Note: circular-dependencies and unused-public-exports are inherently a
+# lib/ concept and are unaffected by this setting.
+# ---------------------------------------------------------------------------
+# source_dirs:
+#   - lib
+#   - bin
+
+# ---------------------------------------------------------------------------
+# ignore — project-relative glob patterns for path suppression
+#
+# Findings whose file path matches any glob are suppressed (Source 1).
+# Inline `// loam-ignore: <ruleId>` in source code is Source 2.
+# Both sources are applied before any gate check.
+# ---------------------------------------------------------------------------
+ignore:
+  # - "lib/generated/**"   # ignore generated files
+  # - "**/*.g.dart"        # ignore all .g.dart files

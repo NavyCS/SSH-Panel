@@ -189,7 +189,7 @@ class _SshPanelShellState extends State<SshPanelShell> {
                 const SizedBox(width: 8),
               ] else if (_elevationMode == SettingsService.modeOnce) ...[
                 ShadTooltip(
-                  builder: (context) => const Text('Reiniciar la aplicación con permisos de Administrador'),
+                  builder: (context) => const Text('Restart the app with administrator rights'),
                   child: ShadButton.outline(
                     size: ShadButtonSize.sm,
                     onPressed: () {

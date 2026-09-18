@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'services/settings_service.dart';
 import 'services/ssh_service.dart';
@@ -161,10 +162,10 @@ class _SshPanelShellState extends State<SshPanelShell> {
           ),
           child: Row(
             children: [
-              Icon(
-                LucideIcons.server,
-                size: 20,
-                color: theme.colorScheme.primary,
+              SvgPicture.asset(
+                'assets/logo.svg',
+                width: 40,
+                height: 40,
               ),
               const SizedBox(width: 10),
               Text(

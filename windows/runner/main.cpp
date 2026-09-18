@@ -26,7 +26,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"ssh_panel", Win32Window::Point(0, 0), size)) {
+  if (!window.Create(L"SSH Panel", Win32Window::Point(0, 0), size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

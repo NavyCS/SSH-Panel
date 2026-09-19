@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'services/settings_service.dart';
 import 'services/ssh_service.dart';
 import 'services/ssh_keys.dart';
 import 'services/ssh_domains.dart';
+import 'toast_service.dart';
 
 /// Shared notifier so the Service tab can signal the Keys tab that the
 /// ssh-agent state changed (started / stopped). The Keys tab listens to this
@@ -20,6 +22,17 @@ final ValueNotifier<SshServiceState?> agentServiceState =
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await SettingsService.getElevationMode();
+
+  // Global uncaught-error handler: route every unhandled Flutter/async
+  // error to the toaster instead of the red debug screen. Never rethrows -
+  // the handler only reports, it does not change control flow.
+  FlutterError.onError = (FlutterErrorDetails details) {
+    ToastService.instance.handleError(details.exception, details.stack ?? StackTrace.empty);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    ToastService.instance.handleError(error, stack);
+    return true;
+  };
 
   // Normal UI path — run the Flutter app.
   runApp(const SshPanelApp());
@@ -64,6 +77,13 @@ class _SshPanelShellState extends State<SshPanelShell> {
     _elevationMode = SettingsService.elevationModeNotifier.value;
     SettingsService.elevationModeNotifier.addListener(_onElevationModeChanged);
     _loadElevationMode();
+    // Capture the ShadToaster state once the first frame is built so any
+    // code (including the global uncaught-error handler) can emit toasts.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ToastService.instance.setState(ShadToaster.of(context));
+      }
+    });
   }
 
   void _onElevationModeChanged() {
@@ -302,50 +322,6 @@ class _ServiceTabState extends State<ServiceTab> {
     super.dispose();
   }
 
-  /// Shows a non-blocking error toast. Keeps all controls visible.
-  void _showToast(SshServiceException e) {
-    final contextRef = context;
-    // Defer to next frame so ShadToaster is available.
-    Future.microtask(() {
-      if (!mounted) return;
-      ShadToaster.of(contextRef).show(
-        ShadToast.destructive(
-          title: Text(_toastTitle(e)),
-          description: Text(_toastDescription(e)),
-          action: Semantics(
-            button: true,
-            label: 'Dismiss notification',
-            child: ShadButton.destructive(
-              child: const Text('Dismiss'),
-              onPressed: () => ShadToaster.of(contextRef).hide(),
-            ),
-          ),
-        ),
-      );
-    });
-  }
-
-  String _toastTitle(SshServiceException e) {
-    return switch (e.code) {
-      SshServiceErrorCode.accessDenied => 'Administrator required',
-      SshServiceErrorCode.serviceNotFound => 'Service not found',
-      SshServiceErrorCode.opensshNotInstalled => 'OpenSSH not installed',
-      _ => 'Service error',
-    };
-  }
-
-  String _toastDescription(SshServiceException e) {
-    return switch (e.code) {
-      SshServiceErrorCode.accessDenied =>
-        'Se requieren permisos de administrador para realizar esta acción. '
-        'En modo "Once", puedes usar el botón "Modo Admin" en la barra superior. '
-        'En modo "Per action", debes aceptar el diálogo de UAC.',
-      SshServiceErrorCode.serviceNotFound => e.message,
-      SshServiceErrorCode.opensshNotInstalled => e.message,
-      _ => e.toString(),
-    };
-  }
-
   Future<void> _refreshStatus() async {
     setState(() {
       _loading = true;
@@ -360,11 +336,11 @@ class _ServiceTabState extends State<ServiceTab> {
       });
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      _showToast(e);
+      ToastService.instance.showError(e);
       setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      _showToast(e is SshServiceException
+      ToastService.instance.showError(e is SshServiceException
           ? e
           : SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
       setState(() => _loading = false);
@@ -379,13 +355,16 @@ class _ServiceTabState extends State<ServiceTab> {
       final status = await _serviceManager.checkStatus();
       agentServiceState.value = status;
       await _refreshStatus();
+      if (mounted) {
+        ToastService.instance.showSuccess('Service action completed.');
+      }
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      _showToast(e);
+      ToastService.instance.showError(e);
       setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      ToastService.instance.showError(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
       setState(() => _loading = false);
     }
   }
@@ -401,13 +380,16 @@ class _ServiceTabState extends State<ServiceTab> {
       await _serviceManager.setStartupType(type);
       if (!mounted) return;
       setState(() => _startupLoading = false);
+      if (mounted) {
+        ToastService.instance.showSuccess('Startup type set.');
+      }
     } on SshServiceException catch (e) {
       if (!mounted) return;
-      _showToast(e);
+      ToastService.instance.showError(e);
       setState(() { _startupType = originalType; _startupLoading = false; });
     } catch (e) {
       if (!mounted) return;
-      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      ToastService.instance.showError(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
       setState(() { _startupType = originalType; _startupLoading = false; });
     }
   }
@@ -513,13 +495,13 @@ class _ServiceTabState extends State<ServiceTab> {
                               if (!adminEnabled) {
                                 return DisabledActionWrapper(
                                   enabled: false,
-                                  tooltip: 'Requiere permisos de administrador. Usa el botón "Restart in Admin Mode" en la barra superior.',
+tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" button in the top bar.',
                                   child: stopBtn,
                                 );
                               }
                               if (!isElevated) {
                                 return ShadTooltip(
-                                  builder: (context) => const Text('Esta acción solicitará confirmación de permisos de administrador (UAC)'),
+                                  builder: (context) => const Text('This action will prompt for administrator confirmation (UAC)'),
                                   child: stopBtn,
                                 );
                               }
@@ -576,7 +558,7 @@ class _ServiceTabState extends State<ServiceTab> {
               if (!adminEnabled) {
                 selectWidget = DisabledActionWrapper(
                   enabled: false,
-                  tooltip: 'Requiere permisos de administrador. Usa el botón "Restart in Admin Mode" en la barra superior.',
+                  tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" button in the top bar.',
                   child: selectWidget,
                 );
               }
@@ -591,8 +573,8 @@ class _ServiceTabState extends State<ServiceTab> {
                       ShadTooltip(
                         builder: (context) => Text(
                           isOnceMode
-                              ? 'Deshabilitado: requiere Admin Mode (barra superior)'
-                              : 'Cambiar esta opción solicitará confirmación de permisos de administrador (UAC)',
+                              ? 'Disabled: requires Admin Mode (top bar)'
+                              : 'Changing this option will prompt for administrator confirmation (UAC)',
                         ),
                         child: Icon(
                           LucideIcons.shield,
@@ -694,7 +676,6 @@ class _KeysTabState extends State<KeysTab> {
   Map<String, bool> _hasPubKey = {};
   Map<String, String> _keyComments = {};
   bool _loading = false;
-  String? _error;
   bool _agentRunning = false;
 
   @override
@@ -719,7 +700,6 @@ class _KeysTabState extends State<KeysTab> {
   Future<void> _refresh() async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       final keyFiles = await _keyManager.listKeyFiles()
@@ -770,66 +750,62 @@ class _KeysTabState extends State<KeysTab> {
       });
     } on TimeoutException catch (_) {
       if (!mounted) return;
-      setState(() {
-        _error =
-            'Refresh timed out — the ssh-agent may be unresponsive.';
-        _loading = false;
-      });
+      ToastService.instance.showError(
+          TimeoutException('Refresh timed out — the ssh-agent may be unresponsive.'));
+      setState(() => _loading = false);
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _addKey(String path) async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       if (await _keyManager.hasPassphrase(path)) {
         final passphrase = await _promptPassphrase();
         if (passphrase == null) {
           if (!mounted) return;
-          setState(() {
-            _loading = false;
-            _error = null;
-          });
+          setState(() => _loading = false);
           return;
         }
         await _keyManager.addKey(path, passphrase: passphrase);
         if (!mounted) return;
         await _refresh();
+        if (mounted) {
+          ToastService.instance.showSuccess('Key added.');
+        }
       } else {
         await _keyManager.addKey(path);
         if (!mounted) return;
         await _refresh();
+        if (mounted) {
+          ToastService.instance.showSuccess('Key added.');
+        }
       }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        if (e.code == SshKeyErrorCode.wrongPassphrase) {
-          _error = 'The passphrase is incorrect.';
-        } else {
-          _error = e.toString();
-        }
-        _loading = false;
-      });
+      if (e.code == SshKeyErrorCode.wrongPassphrase) {
+        ToastService.instance.showErrorMessage('The passphrase is incorrect.');
+      } else {
+        ToastService.instance.showError(e);
+      }
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -899,46 +875,46 @@ class _KeysTabState extends State<KeysTab> {
   Future<void> _removeKey(String path) async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       await _keyManager.removeKey(path);
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Key removed.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _removeAll() async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       await _keyManager.removeAll();
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('All keys removed.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1073,7 +1049,9 @@ class _KeysTabState extends State<KeysTab> {
       final f2 = File(pubPath);
       if (await f2.exists()) await f2.delete();
     } catch (e) {
-      debugPrint('Notice: could not delete existing key file before replacement: $e');
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
     }
 
     try {
@@ -1084,12 +1062,15 @@ class _KeysTabState extends State<KeysTab> {
         passphrase: passphrase,
       );
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Key generated.');
+      }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1105,7 +1086,6 @@ class _KeysTabState extends State<KeysTab> {
 
     setState(() {
       _loading = true;
-      _error = null;
     });
 
     try {
@@ -1116,22 +1096,23 @@ class _KeysTabState extends State<KeysTab> {
         passphrase: passphrase,
       );
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Key generated.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
       if (e.code == SshKeyErrorCode.fileExists) {
         await _handleExistingKeyConflict(params.effectiveName, params.algorithm, params.comment, passphrase);
       } else {
-        setState(() {
-          _error = e.toString();
-          _loading = false;
-        });
+        ToastService.instance.showError(e);
+        setState(() => _loading = false);
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1209,24 +1190,24 @@ class _KeysTabState extends State<KeysTab> {
 
     setState(() {
       _loading = true;
-      _error = null;
     });
 
     try {
       await _keyManager.addAuthorizedKey(text);
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Authorized key added.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1264,24 +1245,24 @@ class _KeysTabState extends State<KeysTab> {
 
     setState(() {
       _loading = true;
-      _error = null;
     });
 
     try {
       await _keyManager.removeAuthorizedKey(key.rawLine);
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Authorized key removed.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1390,9 +1371,8 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final pubKey = await _keyManager.readPublicKey(path);
     if (pubKey == null || pubKey.isEmpty) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Public key not found for ${_shortPath(path)}.';
-      });
+      ToastService.instance
+          .showErrorMessage('Public key not found for ${_shortPath(path)}.');
       return;
     }
 
@@ -1477,7 +1457,6 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
 
     setState(() {
       _loading = true;
-      _error = null;
     });
 
     try {
@@ -1486,24 +1465,25 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
         try {
           await _keyManager.removeKey(path);
         } on SshKeyException catch (e) {
-          debugPrint('Notice: could not unload key from ssh-agent before deletion: $e');
+          ToastService.instance.showError(e);
         }
       }
 
       await _keyManager.deleteKeyFile(path);
       await _refresh();
+      if (mounted) {
+        ToastService.instance.showSuccess('Key file deleted.');
+      }
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1515,15 +1495,6 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---- Error banner ----
-          if (_error != null) ...[
-            ShadAlert.destructive(
-              title: const Text('Error'),
-              description: Text(_error!),
-            ),
-            const SizedBox(height: 16),
-          ],
-
           // ---- Actions ----
           Wrap(
             spacing: 10,
@@ -1540,9 +1511,24 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               Semantics(
                 button: true,
                 label: 'Unload All Keys',
-                child: ShadButton.outline(
-                  onPressed: _loading || !_agentRunning ? null : _removeAll,
-                  child: const Text('Unload All'),
+                child: Builder(
+                  builder: (context) {
+                    final canUnloadAll = !_loading && _agentRunning;
+                    final unloadAllBtn = ShadButton.outline(
+                      onPressed: canUnloadAll ? _removeAll : null,
+                      child: const Text('Unload All'),
+                    );
+                    if (!canUnloadAll) {
+                      return DisabledActionWrapper(
+                        enabled: false,
+                        tooltip: _loading
+                            ? 'Loading...'
+                            : 'The ssh-agent service is not running. Start it on the Service tab first.',
+                        child: unloadAllBtn,
+                      );
+                    }
+                    return unloadAllBtn;
+                  },
                 ),
               ),
               Semantics(
@@ -1817,7 +1803,6 @@ List<Map<String, String>> _knownHosts = [];
     bool _editing = false;
     bool _hostsLoading = false;
     final ValueNotifier<bool> _adding = ValueNotifier<bool>(false);
-    String? _error;
     final Map<String, String?> _hostStatus = {};
     final Set<String> _checkingHosts = {};
 
@@ -1839,7 +1824,6 @@ List<Map<String, String>> _knownHosts = [];
   Future<void> _refresh() async {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       final config = _configManager.readConfig();
@@ -1852,23 +1836,20 @@ List<Map<String, String>> _knownHosts = [];
       });
     } on SshConfigException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
   Future<void> _refreshHosts() async {
     setState(() {
       _hostsLoading = true;
-      _error = null;
     });
     try {
       final hosts = _configManager.getKnownHosts();
@@ -1881,23 +1862,20 @@ List<Map<String, String>> _knownHosts = [];
       });
     } on SshConfigException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _hostsLoading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _hostsLoading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _hostsLoading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _hostsLoading = false);
     }
   }
 
   void _saveConfig() {
     setState(() {
       _loading = true;
-      _error = null;
     });
     try {
       _configManager.writeConfig(_configController.text);
@@ -1905,18 +1883,19 @@ List<Map<String, String>> _knownHosts = [];
         _loading = false;
         _editing = false;
       });
+      if (mounted) {
+        ToastService.instance.showSuccess('Config saved.');
+      }
     } on SshConfigException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _loading = false);
     }
   }
 
@@ -1972,23 +1951,23 @@ void _openSshFolder() {
 
     setState(() {
       _hostsLoading = true;
-      _error = null;
     });
     try {
       _configManager.removeKnownHost(host, keyType);
       await _refreshHosts();
+      if (mounted) {
+        ToastService.instance.showSuccess('Known host entry removed.');
+      }
     } on SshConfigException catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _hostsLoading = false;
-      });
+      ToastService.instance.showError(e);
+      setState(() => _hostsLoading = false);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _hostsLoading = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      setState(() => _hostsLoading = false);
     }
   }
 
@@ -2030,7 +2009,6 @@ void _openSshFolder() {
 
   Future<List<Map<String, String>>?> _scanAvailableHostKeys(String host) async {
     _adding.value = true;
-    _error = null;
     if (mounted) setState(() {});
 
     List<String> keyLines;
@@ -2038,10 +2016,10 @@ void _openSshFolder() {
       keyLines = await _configManager.scanHostKeys(host);
     } catch (e) {
       if (!mounted) return null;
-      setState(() {
-        _error = e.toString();
-        _adding.value = false;
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
+      _adding.value = false;
       return null;
     }
 
@@ -2136,9 +2114,8 @@ void _openSshFolder() {
     if (host.isEmpty) return;
     if (!SshConfigManager.isValidHost(host)) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Invalid host name: "$host".';
-      });
+      ToastService.instance
+          .showErrorMessage('Invalid host name: "$host".');
       return;
     }
 
@@ -2147,9 +2124,8 @@ void _openSshFolder() {
 
     if (available.isEmpty) {
       if (!mounted) return;
-      setState(() {
-        _error = 'Host "$host" already has all of these key types in known_hosts.';
-      });
+      ToastService.instance.showErrorMessage(
+          'Host "$host" already has all of these key types in known_hosts.');
       return;
     }
 
@@ -2158,17 +2134,19 @@ void _openSshFolder() {
 
     setState(() {
       _hostsLoading = true;
-      _error = null;
     });
     try {
       await _configManager.writeKnownHostKeys(host, chosenLines);
       _hostController.clear();
       await _refreshHosts();
+      if (mounted) {
+        ToastService.instance.showSuccess('Known host added.');
+      }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-      });
+      ToastService.instance.showError(e is Exception
+          ? e
+          : Exception(e.toString()));
     }
   }
 
@@ -2275,15 +2253,6 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
   return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           children: [
-          // ---- Error banner ----
-          if (_error != null) ...[
-            ShadAlert.destructive(
-              title: const Text('Error'),
-              description: Text(_error!),
-            ),
-            const SizedBox(height: 16),
-          ],
-
           // ---- Config card ----
           ShadCard(
             title: Row(

@@ -282,6 +282,7 @@ class _ServiceTabState extends State<ServiceTab> {
   final _serviceManager = SshServiceManager();
   SshServiceState? _status;
   bool _loading = false;
+  bool _startupLoading = false;
   StartupType _startupType = StartupType.manual;
 
   @override
@@ -395,19 +396,19 @@ class _ServiceTabState extends State<ServiceTab> {
 
   Future<void> _setStartupType(StartupType type) async {
     final originalType = _startupType;
-    setState(() { _startupType = type; _loading = true; });
+    setState(() { _startupType = type; _startupLoading = true; });
     try {
       await _serviceManager.setStartupType(type);
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() => _startupLoading = false);
     } on SshServiceException catch (e) {
       if (!mounted) return;
       _showToast(e);
-      setState(() { _startupType = originalType; _loading = false; });
+      setState(() { _startupType = originalType; _startupLoading = false; });
     } catch (e) {
       if (!mounted) return;
       _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
-      setState(() { _startupType = originalType; _loading = false; });
+      setState(() { _startupType = originalType; _startupLoading = false; });
     }
   }
 
@@ -553,7 +554,7 @@ class _ServiceTabState extends State<ServiceTab> {
             builder: (context, constraints) {
               Widget selectWidget = ShadSelect<StartupType>(
                 initialValue: _startupType,
-                enabled: !_loading && adminEnabled,
+                enabled: !_startupLoading && adminEnabled,
                 options: StartupType.values.map((type) {
                   final label =
                       type.name[0].toUpperCase() + type.name.substring(1);

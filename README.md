@@ -5,7 +5,7 @@ SSH keys, and `~/.ssh/config` / `known_hosts`.
 
 Built with Flutter and the [shadcn/ui](https://pub.dev/packages/shadcn_ui) component
 library. Service control goes through the Windows Service Control Manager via
-[`package:win32`](https://pub.dev/packages/win32); the agent's *startup type* is
+[`package:win32`](https://pub.dev/packages/win32); the agent's _startup type_ is
 set with `sc.exe` (a documented gap — `win32` cannot change the start type).
 Packaged as an MSIX with the `winapp` CLI.
 
@@ -35,7 +35,7 @@ or change the startup type.
   install as "incomplete" even when the build succeeds; that is a false
   positive.
 - [`winapp` CLI](https://github.com/microsoft/winappCli): `winget install
-  Microsoft.winappcli`
+Microsoft.winappcli`
 - OpenSSH (optional — the app detects its absence and degrades gracefully)
 
 ## Project layout
@@ -120,7 +120,7 @@ winapp run build/windows/x64/runner/Release
 - `app.manifest` must be created by hand — `flutter create` only writes an
   empty `runner.exe.manifest`, and `winapp` does not generate one.
 - `allowElevation` is a **restricted capability** under the `rescap` namespace
-  (`.../foundation/windows10/restrictedcapabilities`), *not* `desktop6`.
+  (`.../foundation/windows10/restrictedcapabilities`), _not_ `desktop6`.
 - `winapp pack <output>` is invalid — `pack` aliases `package`, which takes an
   **input folder**.
 - Key generation uses `ssh-keygen -P` (never `-N`, which errors on Windows) and
@@ -139,4 +139,14 @@ and a hint:
 handleOpenFailed: Failed to open the Service Control Manager. (OpenSCManager error 5 -- access denied (the app is not running elevated))
 accessDenied: Access denied opening the ssh-agent service. (OpenService error 5 -- the app is not running elevated)
 serviceNotFound: The ssh-agent service does not exist. (OpenService error 1060)
+```
+
+## Loam
+
+```powershell
+dart pub global activate loam
+```
+
+```powershell
+loam scan --format json > loam-report.json
 ```

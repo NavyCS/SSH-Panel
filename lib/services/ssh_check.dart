@@ -27,14 +27,17 @@ enum OpenSshStatus {
 }
 
 /// The outcome of an OpenSSH presence check.
+// loam-ignore: unused-public-exports -- Standalone reusable OpenSSH presence check module
 class OpenSshCheckResult {
   /// Creates a check result.
   const OpenSshCheckResult({required this.status, this.detail});
 
   /// Whether OpenSSH is installed.
+  // loam-ignore: unused-public-exports -- Result model field
   final OpenSshStatus status;
 
   /// Optional human-readable note (e.g. capability name or error summary).
+  // loam-ignore: unused-public-exports -- Result model field
   final String? detail;
 }
 
@@ -46,6 +49,7 @@ class OpenSshCheckResult {
 ///
 /// Returns [OpenSshCheckResult] with status [OpenSshStatus.present] or
 /// [OpenSshStatus.absent].  Never throws.
+// loam-ignore: unused-public-exports -- Standalone reusable OpenSSH presence check API
 Future<OpenSshCheckResult> sshCheck() async {
   // Strategy 1 — Windows capability store (most authoritative).
   try {
@@ -69,8 +73,9 @@ Future<OpenSshCheckResult> sshCheck() async {
         );
       }
     }
-  } catch (_) {
-    // PowerShell itself was unreachable — fall through to strategy 2.
+  } catch (e) {
+    // PowerShell unreachable or command failed; log notice and fall through.
+    stderr.writeln('sshCheck strategy 1 notice: $e');
   }
 
   // Strategy 2 — PATH lookup via Get-Command.
@@ -93,8 +98,9 @@ Future<OpenSshCheckResult> sshCheck() async {
         );
       }
     }
-  } catch (_) {
-    // Fall through.
+  } catch (e) {
+    // PATH lookup failed; log notice and return absent.
+    stderr.writeln('sshCheck strategy 2 notice: $e');
   }
 
   return const OpenSshCheckResult(status: OpenSshStatus.absent);

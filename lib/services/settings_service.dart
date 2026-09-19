@@ -36,10 +36,6 @@ class SettingsService {
     elevationModeNotifier.value = mode;
   }
 
-  static Future<bool> isOnceMode() async {
-    return await getElevationMode() == modeOnce;
-  }
-
   static bool? _cachedIsElevated;
 
   /// Checks whether the current process is running with Administrator privileges

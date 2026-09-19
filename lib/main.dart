@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import 'services/settings_service.dart';
 import 'services/ssh_service.dart';
@@ -124,9 +123,13 @@ class _SshPanelShellState extends State<SshPanelShell> {
             ],
           ),
           actions: [
-            ShadButton.ghost(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Close'),
+            Semantics(
+              button: true,
+              label: 'Close',
+              child: ShadButton.ghost(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Close'),
+              ),
             ),
           ],
         ),
@@ -174,34 +177,42 @@ class _SshPanelShellState extends State<SshPanelShell> {
               ),
               const Spacer(),
               if (isAdminMode) ...[
-                const ShadButton.outline(
-                  size: ShadButtonSize.sm,
-                  onPressed: null,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(LucideIcons.shield, size: 13),
-                      SizedBox(width: 5),
-                      Text('Admin Mode'),
-                    ],
+                Semantics(
+                  button: true,
+                  label: 'Admin Mode',
+                  child: const ShadButton.outline(
+                    size: ShadButtonSize.sm,
+                    onPressed: null,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(LucideIcons.shield, size: 13),
+                        SizedBox(width: 5),
+                        Text('Admin Mode'),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
               ] else if (_elevationMode == SettingsService.modeOnce) ...[
                 ShadTooltip(
                   builder: (context) => const Text('Restart the app with administrator rights'),
-                  child: ShadButton.outline(
-                    size: ShadButtonSize.sm,
-                    onPressed: () {
-                      SettingsService.restartElevated();
-                    },
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(LucideIcons.shield, size: 13),
-                        SizedBox(width: 5),
-                        Text('Restart in Admin Mode'),
-                      ],
+                  child: Semantics(
+                    button: true,
+                    label: 'Restart in Admin Mode',
+                    child: ShadButton.outline(
+                      size: ShadButtonSize.sm,
+                      onPressed: () {
+                        SettingsService.restartElevated();
+                      },
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(LucideIcons.shield, size: 13),
+                          SizedBox(width: 5),
+                          Text('Restart in Admin Mode'),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -209,10 +220,14 @@ class _SshPanelShellState extends State<SshPanelShell> {
               ],
               ShadTooltip(
                 builder: (context) => const Text('Settings'),
-                child: ShadIconButton(
-                  icon: const Icon(LucideIcons.settings),
-                  iconSize: 18,
-                  onPressed: _showSettingsDialog,
+                child: Semantics(
+                  button: true,
+                  label: 'Settings',
+                  child: ShadIconButton(
+                    icon: const Icon(LucideIcons.settings),
+                    iconSize: 18,
+                    onPressed: _showSettingsDialog,
+                  ),
                 ),
               ),
             ],
@@ -254,9 +269,7 @@ class _SshPanelShellState extends State<SshPanelShell> {
     }
   }
 
-// ===========================================================================
 // Service tab
-// ===========================================================================
 
 class ServiceTab extends StatefulWidget {
   const ServiceTab({super.key});
@@ -298,9 +311,13 @@ class _ServiceTabState extends State<ServiceTab> {
         ShadToast.destructive(
           title: Text(_toastTitle(e)),
           description: Text(_toastDescription(e)),
-          action: ShadButton.destructive(
-            child: const Text('Dismiss'),
-            onPressed: () => ShadToaster.of(contextRef).hide(),
+          action: Semantics(
+            button: true,
+            label: 'Dismiss notification',
+            child: ShadButton.destructive(
+              child: const Text('Dismiss'),
+              onPressed: () => ShadToaster.of(contextRef).hide(),
+            ),
           ),
         ),
       );
@@ -353,10 +370,10 @@ class _ServiceTabState extends State<ServiceTab> {
     }
   }
 
-  Future<void> _startService() async {
+  Future<void> _performServiceAction(Future<void> Function() action) async {
     setState(() => _loading = true);
     try {
-      await _serviceManager.start();
+      await action();
       if (!mounted) return;
       final status = await _serviceManager.checkStatus();
       agentServiceState.value = status;
@@ -372,24 +389,9 @@ class _ServiceTabState extends State<ServiceTab> {
     }
   }
 
-  Future<void> _stopService() async {
-    setState(() => _loading = true);
-    try {
-      await _serviceManager.stop();
-      if (!mounted) return;
-      final status = await _serviceManager.checkStatus();
-      agentServiceState.value = status;
-      await _refreshStatus();
-    } on SshServiceException catch (e) {
-      if (!mounted) return;
-      _showToast(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      _showToast(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
-      setState(() => _loading = false);
-    }
-  }
+  Future<void> _startService() => _performServiceAction(() => _serviceManager.start());
+
+  Future<void> _stopService() => _performServiceAction(() => _serviceManager.stop());
 
   Future<void> _setStartupType(StartupType type) async {
     final originalType = _startupType;
@@ -467,35 +469,43 @@ class _ServiceTabState extends State<ServiceTab> {
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          ShadButton(
-                            onPressed: _loading ? null : _startService,
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(LucideIcons.play, size: 14),
-                                SizedBox(width: 6),
-                                Text('Start'),
-                              ],
+                          Semantics(
+                            button: true,
+                            label: 'Start Service',
+                            child: ShadButton(
+                              onPressed: _loading ? null : _startService,
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(LucideIcons.play, size: 14),
+                                  SizedBox(width: 6),
+                                  Text('Start'),
+                                ],
+                              ),
                             ),
                           ),
                           Builder(
                             builder: (context) {
-                              Widget stopBtn = ShadButton.destructive(
-                                onPressed: (_loading || !adminEnabled) ? null : _stopService,
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      LucideIcons.stopCircle,
-                                      size: 14,
-                                    ),
-                                    if (!isElevated && !isOnceMode) ...[
-                                      const SizedBox(width: 4),
-                                      const Icon(LucideIcons.shield, size: 14),
+                              Widget stopBtn = Semantics(
+                                button: true,
+                                label: 'Stop Service',
+                                child: ShadButton.destructive(
+                                  onPressed: (_loading || !adminEnabled) ? null : _stopService,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        LucideIcons.stopCircle,
+                                        size: 14,
+                                      ),
+                                      if (!isElevated && !isOnceMode) ...[
+                                        const SizedBox(width: 4),
+                                        const Icon(LucideIcons.shield, size: 14),
+                                      ],
+                                      const SizedBox(width: 6),
+                                      const Text('Stop'),
                                     ],
-                                    const SizedBox(width: 6),
-                                    const Text('Stop'),
-                                  ],
+                                  ),
                                 ),
                               );
 
@@ -515,15 +525,19 @@ class _ServiceTabState extends State<ServiceTab> {
                               return stopBtn;
                             },
                           ),
-                          ShadButton.outline(
-                            onPressed: _loading ? null : _refreshStatus,
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(LucideIcons.refreshCw, size: 14),
-                                SizedBox(width: 6),
-                                Text('Refresh'),
-                              ],
+                          Semantics(
+                            button: true,
+                            label: 'Refresh Status',
+                            child: ShadButton.outline(
+                              onPressed: _loading ? null : _refreshStatus,
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(LucideIcons.refreshCw, size: 14),
+                                  SizedBox(width: 6),
+                                  Text('Refresh'),
+                                ],
+                              ),
                             ),
                           ),
                         ],
@@ -607,9 +621,7 @@ class _ServiceTabState extends State<ServiceTab> {
   }
 }
 
-// ===========================================================================
 // Reusable Action Wrapper for Disabled States
-// ===========================================================================
 
 /// A reusable wrapper that ensures disabled buttons properly look and behave
 /// as disabled: applies opacity, blocks internal pointer hover effects,
@@ -648,9 +660,21 @@ class DisabledActionWrapper extends StatelessWidget {
   }
 }
 
-// ===========================================================================
+class _KeyGenerationParams {
+  const _KeyGenerationParams({
+    required this.effectiveName,
+    required this.algorithm,
+    required this.comment,
+    required this.passphraseProtected,
+  });
+
+  final String effectiveName;
+  final KeyAlgorithm algorithm;
+  final String? comment;
+  final bool passphraseProtected;
+}
+
 // Keys tab
-// ===========================================================================
 
 class KeysTab extends StatefulWidget {
   const KeysTab({super.key});
@@ -831,25 +855,37 @@ class _KeysTabState extends State<KeysTab> {
               child: OverflowBox(
                 maxWidth: 28,
                 maxHeight: 28,
-                child: ShadIconButton(
-                  iconSize: 20,
-                  padding: EdgeInsets.all(2),
-                  icon: Icon(obscure ? LucideIcons.eyeOff : LucideIcons.eye),
-                  onPressed: () {
-                    setStateDialog(() => obscure = !obscure);
-                  },
+                child: Semantics(
+                  button: true,
+                  label: obscure ? 'Show passphrase' : 'Hide passphrase',
+                  child: ShadIconButton(
+                    iconSize: 20,
+                    padding: EdgeInsets.all(2),
+                    icon: Icon(obscure ? LucideIcons.eyeOff : LucideIcons.eye),
+                    onPressed: () {
+                      setStateDialog(() => obscure = !obscure);
+                    },
+                  ),
                 ),
               ),
             ),
           ),
           actions: [
-            ShadButton.ghost(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
+            Semantics(
+              button: true,
+              label: 'Cancel passphrase prompt',
+              child: ShadButton.ghost(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
             ),
-            ShadButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Load'),
+            Semantics(
+              button: true,
+              label: 'Load key with passphrase',
+              child: ShadButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Load'),
+              ),
             ),
           ],
         ),
@@ -905,7 +941,7 @@ class _KeysTabState extends State<KeysTab> {
     }
   }
 
-  Future<void> _generateKey() async {
+  Future<_KeyGenerationParams?> _promptKeyGeneration() async {
     final nameController = TextEditingController();
     final commentController = TextEditingController();
     bool passphraseProtected = false;
@@ -917,13 +953,21 @@ class _KeysTabState extends State<KeysTab> {
         builder: (context, setStateDialog) => ShadDialog(
           title: const Text('Generate Key'),
           actions: [
-            ShadButton.ghost(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancel'),
+            Semantics(
+              button: true,
+              label: 'Cancel key generation',
+              child: ShadButton.ghost(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
             ),
-            ShadButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Generate'),
+            Semantics(
+              button: true,
+              label: 'Generate key',
+              child: ShadButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Generate'),
+              ),
             ),
           ],
           child: Column(
@@ -977,14 +1021,83 @@ class _KeysTabState extends State<KeysTab> {
       ),
     );
 
-    if (confirmed != true) return;
-
+    if (confirmed != true) return null;
     final name = nameController.text.trim();
-    // Use algorithm default name if empty.
     final effectiveName = name.isEmpty ? algorithm.defaultName : name;
+    final comment = commentController.text.isEmpty ? null : commentController.text;
+    return _KeyGenerationParams(
+      effectiveName: effectiveName,
+      algorithm: algorithm,
+      comment: comment,
+      passphraseProtected: passphraseProtected,
+    );
+  }
+
+  Future<void> _handleExistingKeyConflict(String keyName, KeyAlgorithm algorithm, String? comment, String? passphrase) async {
+    final replace = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ShadDialog(
+        title: const Text('Key already exists'),
+        description: const Text(
+          'A key with this name already exists. Do you want to replace it?',
+        ),
+        actions: [
+          Semantics(
+            button: true,
+            label: 'Cancel replace',
+            child: ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: 'Replace existing key',
+            child: ShadButton.destructive(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Replace'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (replace != true || !mounted) return;
+
+    final dir = _keyManager.sshDirectory;
+    final keyPath = '$dir${Platform.pathSeparator}$keyName';
+    final pubPath = '$keyPath.pub';
+    try {
+      final f1 = File(keyPath);
+      if (await f1.exists()) await f1.delete();
+      final f2 = File(pubPath);
+      if (await f2.exists()) await f2.delete();
+    } catch (e) {
+      debugPrint('Notice: could not delete existing key file before replacement: $e');
+    }
+
+    try {
+      await _keyManager.generateKey(
+        name: keyName,
+        algorithm: algorithm,
+        comment: comment,
+        passphrase: passphrase,
+      );
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _generateKey() async {
+    final params = await _promptKeyGeneration();
+    if (params == null) return;
 
     String? passphrase;
-    if (passphraseProtected) {
+    if (params.passphraseProtected) {
       passphrase = await _promptPassphrase();
       if (passphrase == null) return;
     }
@@ -993,72 +1106,19 @@ class _KeysTabState extends State<KeysTab> {
       _loading = true;
       _error = null;
     });
+
     try {
       await _keyManager.generateKey(
-        name: effectiveName,
-        algorithm: algorithm,
-        comment: commentController.text.isEmpty ? null : commentController.text,
+        name: params.effectiveName,
+        algorithm: params.algorithm,
+        comment: params.comment,
         passphrase: passphrase,
       );
       await _refresh();
     } on SshKeyException catch (e) {
       if (!mounted) return;
-      // If key file already exists, ask if user wants to replace it.
       if (e.code == SshKeyErrorCode.fileExists) {
-        final replace = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => ShadDialog(
-            title: const Text('Key already exists'),
-            description: const Text(
-              'A key with this name already exists. Do you want to '
-              'replace it?',
-            ),
-            actions: [
-              ShadButton.ghost(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
-              ),
-              ShadButton.destructive(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Replace'),
-              ),
-            ],
-          ),
-        );
-        if (replace != true || !mounted) return;
-        // Remove existing files and try again.
-        final dir = _keyManager.sshDirectory;
-        final keyPath = '$dir${Platform.pathSeparator}$effectiveName';
-        final pubPath = '$keyPath.pub';
-        try {
-          final f1 = File(keyPath);
-          if (await f1.exists()) await f1.delete();
-          final f2 = File(pubPath);
-          if (await f2.exists()) await f2.delete();
-        } catch (_) {}
-        try {
-          await _keyManager.generateKey(
-            name: effectiveName,
-            algorithm: algorithm,
-            comment: commentController.text.isEmpty
-                ? null
-                : commentController.text,
-            passphrase: passphrase,
-          );
-          await _refresh();
-        } on SshKeyException catch (e2) {
-          if (!mounted) return;
-          setState(() {
-            _error = e2.toString();
-            _loading = false;
-          });
-        } catch (e2) {
-          if (!mounted) return;
-          setState(() {
-            _error = e2.toString();
-            _loading = false;
-          });
-        }
+        await _handleExistingKeyConflict(params.effectiveName, params.algorithm, params.comment, passphrase);
       } else {
         setState(() {
           _error = e.toString();
@@ -1122,13 +1182,21 @@ class _KeysTabState extends State<KeysTab> {
           ),
         ),
         actions: [
-          ShadButton.ghost(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+          Semantics(
+            button: true,
+            label: 'Cancel add authorized key',
+            child: ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
           ),
-          ShadButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Add'),
+          Semantics(
+            button: true,
+            label: 'Add authorized key',
+            child: ShadButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Add'),
+            ),
           ),
         ],
       ),
@@ -1171,13 +1239,21 @@ class _KeysTabState extends State<KeysTab> {
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
-          ShadButton.ghost(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+          Semantics(
+            button: true,
+            label: 'Cancel remove key',
+            child: ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
           ),
-          ShadButton.destructive(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Remove'),
+          Semantics(
+            button: true,
+            label: 'Remove authorized key',
+            child: ShadButton.destructive(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Remove'),
+            ),
           ),
         ],
       ),
@@ -1244,10 +1320,14 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             tooltip: hasPub
                 ? 'View public key of ${_shortPath(path)}'
                 : 'No .pub file for ${_shortPath(path)}',
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: !_loading && hasPub ? () => _viewPublicKey(path) : null,
-              child: const Text('View'),
+            child: Semantics(
+              button: true,
+              label: 'View public key ${_shortPath(path)}',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: !_loading && hasPub ? () => _viewPublicKey(path) : null,
+                child: const Text('View'),
+              ),
             ),
           ),
           const SizedBox(width: 4),
@@ -1258,10 +1338,14 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 : isLoaded
                     ? 'Key is already loaded in agent'
                     : 'Load ${_shortPath(path)} into ssh-agent',
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: canLoad ? () => _addKey(path) : null,
-              child: const Text('Load'),
+            child: Semantics(
+              button: true,
+              label: 'Load ${_shortPath(path)}',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: canLoad ? () => _addKey(path) : null,
+                child: const Text('Load'),
+              ),
             ),
           ),
           DisabledActionWrapper(
@@ -1271,20 +1355,28 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 : !isLoaded
                     ? 'Key is not loaded in agent'
                     : 'Unload ${_shortPath(path)} from ssh-agent',
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: canUnload ? () => _removeKey(path) : null,
-              child: const Text('Unload'),
+            child: Semantics(
+              button: true,
+              label: 'Unload ${_shortPath(path)}',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: canUnload ? () => _removeKey(path) : null,
+                child: const Text('Unload'),
+              ),
             ),
           ),
           const SizedBox(width: 4),
           DisabledActionWrapper(
             enabled: !_loading,
             tooltip: 'Delete ${_shortPath(path)} and its .pub file',
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: !_loading ? () => _deleteKeyFile(path) : null,
-              child: const Text('Delete'),
+            child: Semantics(
+              button: true,
+              label: 'Delete ${_shortPath(path)}',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: !_loading ? () => _deleteKeyFile(path) : null,
+                child: const Text('Delete'),
+              ),
             ),
           ),
         ],
@@ -1322,16 +1414,24 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           ),
         ),
         actions: [
-          ShadButton.ghost(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Close'),
+          Semantics(
+            button: true,
+            label: 'Close public key dialog',
+            child: ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Close'),
+            ),
           ),
-          ShadButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: pubKey));
-              Navigator.of(ctx).pop();
-            },
-            child: const Text('Copy'),
+          Semantics(
+            button: true,
+            label: 'Copy public key to clipboard',
+            child: ShadButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: pubKey));
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Copy'),
+            ),
           ),
         ],
       ),
@@ -1352,13 +1452,21 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
-          ShadButton.ghost(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
+          Semantics(
+            button: true,
+            label: 'Cancel delete key',
+            child: ShadButton.ghost(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
           ),
-          ShadButton.destructive(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Delete'),
+          Semantics(
+            button: true,
+            label: 'Confirm delete key',
+            child: ShadButton.destructive(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Delete'),
+            ),
           ),
         ],
       ),
@@ -1376,9 +1484,8 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
       if (_isKeyLoaded(path)) {
         try {
           await _keyManager.removeKey(path);
-        } on SshKeyException catch (_) {
-          // The agent may reject the unload (e.g. path mismatch); the file
-          // deletion below still proceeds so the user is never stuck.
+        } on SshKeyException catch (e) {
+          debugPrint('Notice: could not unload key from ssh-agent before deletion: $e');
         }
       }
 
@@ -1421,20 +1528,32 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             spacing: 10,
             runSpacing: 10,
             children: [
-               ShadButton(
-                 onPressed: _loading ? null : _generateKey,
-                 child: const Text('Generate'),
-               ),
-ShadButton.outline(
-                    onPressed: _loading || !_agentRunning ? null : _removeAll,
-                   child: const Text('Unload All'),
-                 ),
-                ShadButton.ghost(
+              Semantics(
+                button: true,
+                label: 'Generate Key',
+                child: ShadButton(
+                  onPressed: _loading ? null : _generateKey,
+                  child: const Text('Generate'),
+                ),
+              ),
+              Semantics(
+                button: true,
+                label: 'Unload All Keys',
+                child: ShadButton.outline(
+                  onPressed: _loading || !_agentRunning ? null : _removeAll,
+                  child: const Text('Unload All'),
+                ),
+              ),
+              Semantics(
+                button: true,
+                label: 'Refresh Keys',
+                child: ShadButton.ghost(
                   onPressed: _loading ? null : _refresh,
                   child: const Text('Refresh'),
                 ),
-             ],
-           ),
+              ),
+            ],
+          ),
 
           const SizedBox(height: 16),
 
@@ -1444,10 +1563,14 @@ ShadButton.outline(
               children: [
                 const Text('Key Files'),
                 const SizedBox(width: 8),
-                ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  onPressed: _openSshFolder,
-                  child: const Icon(LucideIcons.folderOpen, size: 14),
+                Semantics(
+                  button: true,
+                  label: 'Open SSH Folder',
+                  child: ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    onPressed: _openSshFolder,
+                    child: const Icon(LucideIcons.folderOpen, size: 14),
+                  ),
                 ),
               ],
             ),
@@ -1567,10 +1690,14 @@ ShadButton.outline(
               children: [
                 const Text('Authorized Keys'),
                 const Spacer(),
-                ShadButton.outline(
-                  size: ShadButtonSize.sm,
-                  onPressed: _loading ? null : _addAuthorizedKeyDialog,
-                  child: const Text('Add Key'),
+                Semantics(
+                  button: true,
+                  label: 'Add Key to authorized_keys',
+                  child: ShadButton.outline(
+                    size: ShadButtonSize.sm,
+                    onPressed: _loading ? null : _addAuthorizedKeyDialog,
+                    child: const Text('Add Key'),
+                  ),
                 ),
               ],
             ),
@@ -1636,14 +1763,18 @@ ShadButton.outline(
                                     builder: (context) => const Text(
                                       'Remove from authorized_keys',
                                     ),
-                                    child: ShadButton.ghost(
-                                      size: ShadButtonSize.sm,
-                                      onPressed: _loading
-                                          ? null
-                                          : () => _removeAuthorizedKey(key),
-                                      child: const Icon(
-                                        LucideIcons.trash2,
-                                        size: 14,
+                                    child: Semantics(
+                                      button: true,
+                                      label: 'Remove key from authorized_keys',
+                                      child: ShadButton.ghost(
+                                        size: ShadButtonSize.sm,
+                                        onPressed: _loading
+                                            ? null
+                                            : () => _removeAuthorizedKey(key),
+                                        child: const Icon(
+                                          LucideIcons.trash2,
+                                          size: 14,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1667,9 +1798,7 @@ ShadButton.outline(
   }
 }
 
-// ===========================================================================
 // Domains tab
-// ===========================================================================
 
 class DomainsTab extends StatefulWidget {
   const DomainsTab({super.key});
@@ -1819,13 +1948,21 @@ void _openSshFolder() {
           'Remove the $keyType entry for "$host" from known_hosts?',
         ),
         actions: [
-          ShadButton.outline(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+          Semantics(
+            button: true,
+            label: 'Cancel remove host',
+            child: ShadButton.outline(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
           ),
-          ShadButton.destructive(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
+          Semantics(
+            button: true,
+            label: 'Confirm remove host',
+            child: ShadButton.destructive(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Remove'),
+            ),
           ),
         ],
       ),
@@ -1890,16 +2027,7 @@ void _openSshFolder() {
     }
   }
 
-Future<void> _addKnownHost() async {
-    final host = _hostController.text.trim();
-    if (host.isEmpty) return;
-    if (!SshConfigManager.isValidHost(host)) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Invalid host name: "$host".';
-      });
-      return;
-    }
+  Future<List<Map<String, String>>?> _scanAvailableHostKeys(String host) async {
     _adding.value = true;
     _error = null;
     if (mounted) setState(() {});
@@ -1907,25 +2035,18 @@ Future<void> _addKnownHost() async {
     List<String> keyLines;
     try {
       keyLines = await _configManager.scanHostKeys(host);
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _adding.value = false;
-      });
-      return;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _error = e.toString();
         _adding.value = false;
       });
-      return;
+      return null;
     }
-    if (!mounted) return;
+
+    if (!mounted) return null;
     _adding.value = false;
 
-    // Parse each line into (keyType, fullLine) pairs.
     final entries = <Map<String, String>>[];
     for (final line in keyLines) {
       final tokens = line.split(RegExp(r'\s+'));
@@ -1933,28 +2054,18 @@ Future<void> _addKnownHost() async {
       entries.add(<String, String>{'keyType': keyType, 'line': line});
     }
 
-    // Filter out key types that already exist for this host.
     final existingKeyTypes = _knownHosts
         .where((h) => h['host'] == host)
         .map((h) => h['keyType']!)
         .toSet();
-    final available = entries
+
+    return entries
         .where((e) => !existingKeyTypes.contains(e['keyType']))
         .toList();
+  }
 
-    if (available.isEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _error = 'Host "$host" already has all of these key types in known_hosts.';
-      });
-      return;
-    }
-
-    // Show a dialog with checkboxes for each key type.
-    final selected = <int>{};
-    for (var i = 0; i < available.length; i++) {
-      selected.add(i);
-    }
+  Future<List<String>?> _selectKeysToAdd(String host, List<Map<String, String>> available) async {
+    final selected = List.generate(available.length, (i) => i).toSet();
 
     final confirmed = await showShadDialog<bool>(
       context: context,
@@ -1992,26 +2103,57 @@ Future<void> _addKnownHost() async {
             ],
           ),
           actions: [
-            ShadButton.outline(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
+            Semantics(
+              button: true,
+              label: 'Cancel add keys',
+              child: ShadButton.outline(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
             ),
-            ShadButton(
-              onPressed: selected.isEmpty
-                  ? null
-                  : () => Navigator.of(context).pop(true),
-              child: const Text('Add'),
+            Semantics(
+              button: true,
+              label: 'Add selected keys',
+              child: ShadButton(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(true),
+                child: const Text('Add'),
+              ),
             ),
           ],
         ),
       ),
     );
 
-    if (confirmed != true || selected.isEmpty) return;
+    if (confirmed != true || selected.isEmpty) return null;
+    return selected.map((i) => available[i]['line']!).toList();
+  }
 
-    final chosenLines = selected
-        .map((i) => available[i]['line']!)
-        .toList();
+  Future<void> _addKnownHost() async {
+    final host = _hostController.text.trim();
+    if (host.isEmpty) return;
+    if (!SshConfigManager.isValidHost(host)) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Invalid host name: "$host".';
+      });
+      return;
+    }
+
+    final available = await _scanAvailableHostKeys(host);
+    if (available == null) return;
+
+    if (available.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Host "$host" already has all of these key types in known_hosts.';
+      });
+      return;
+    }
+
+    final chosenLines = await _selectKeysToAdd(host, available);
+    if (chosenLines == null || chosenLines.isEmpty) return;
 
     setState(() {
       _hostsLoading = true;
@@ -2021,11 +2163,6 @@ Future<void> _addKnownHost() async {
       await _configManager.writeKnownHostKeys(host, chosenLines);
       _hostController.clear();
       await _refreshHosts();
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2067,18 +2204,22 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
           const SizedBox(width: 8),
           ShadTooltip(
             builder: (context) => Text(host),
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: _hostsLoading || _checkingHosts.contains(host)
-                  ? null
-                  : () => _checkHost(host),
-              child: _checkingHosts.contains(host)
-                  ? const SizedBox(
-                      width: 12,
-                      height: 12,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Check'),
+            child: Semantics(
+              button: true,
+              label: 'Check host $host',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: _hostsLoading || _checkingHosts.contains(host)
+                    ? null
+                    : () => _checkHost(host),
+                child: _checkingHosts.contains(host)
+                    ? const SizedBox(
+                        width: 12,
+                        height: 12,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Check'),
+              ),
             ),
           ),
           const SizedBox(width: 6),
@@ -2089,15 +2230,19 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                     ? 'Did not respond to ssh-keyscan.'
                     : _hostStatus[host]!,
               ),
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
-                onPressed: () {},
-                child: ShadBadge(
-                  child: Text(
-                    _hostStatus[host] == 'Unreachable'
-                        ? 'Unreachable'
-                        : '${_hostStatus[host]!.split(', ').length} key(s) found',
-                    style: const TextStyle(fontSize: 10),
+              child: Semantics(
+                button: true,
+                label: 'Host status for $host: ${_hostStatus[host]}',
+                child: ShadButton.ghost(
+                  size: ShadButtonSize.sm,
+                  onPressed: () {},
+                  child: ShadBadge(
+                    child: Text(
+                      _hostStatus[host] == 'Unreachable'
+                          ? 'Unreachable'
+                          : '${_hostStatus[host]!.split(', ').length} key(s) found',
+                      style: const TextStyle(fontSize: 10),
+                    ),
                   ),
                 ),
               ),
@@ -2105,12 +2250,16 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
           const SizedBox(width: 6),
           ShadTooltip(
             builder: (context) => Text(host),
-            child: ShadButton.ghost(
-              size: ShadButtonSize.sm,
-              onPressed: _hostsLoading
-                  ? null
-                  : () => _removeKnownHost(host, keyType),
-              child: const Text('Remove'),
+            child: Semantics(
+              button: true,
+              label: 'Remove host $host',
+              child: ShadButton.ghost(
+                size: ShadButtonSize.sm,
+                onPressed: _hostsLoading
+                    ? null
+                    : () => _removeKnownHost(host, keyType),
+                child: const Text('Remove'),
+              ),
             ),
           ),
         ],
@@ -2140,10 +2289,14 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               children: [
                 const Text('SSH Config'),
                 const SizedBox(width: 8),
-                ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  onPressed: _openSshFolder,
-                  child: const Icon(LucideIcons.folderOpen, size: 14),
+                Semantics(
+                  button: true,
+                  label: 'Open SSH Folder',
+                  child: ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    onPressed: _openSshFolder,
+                    child: const Icon(LucideIcons.folderOpen, size: 14),
+                  ),
                 ),
               ],
             ),
@@ -2154,30 +2307,46 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                 const SizedBox(height: 12),
                 Row(
                   children: [
-                    ShadButton.outline(
-                      onPressed: _loading ? null : _refresh,
-                      child: const Text('Reload'),
+                    Semantics(
+                      button: true,
+                      label: 'Reload SSH Config',
+                      child: ShadButton.outline(
+                        onPressed: _loading ? null : _refresh,
+                        child: const Text('Reload'),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     if (!_editing)
-                      ShadButton.outline(
-                        onPressed: _loading ? null : () => setState(() => _editing = true),
-                        child: const Text('Edit'),
+                      Semantics(
+                        button: true,
+                        label: 'Edit SSH Config',
+                        child: ShadButton.outline(
+                          onPressed: _loading ? null : () => setState(() => _editing = true),
+                          child: const Text('Edit'),
+                        ),
                       ),
                     if (_editing) ...[
-                      ShadButton(
-                        onPressed: _loading ? null : _saveConfig,
-                        child: const Text('Save'),
+                      Semantics(
+                        button: true,
+                        label: 'Save SSH Config',
+                        child: ShadButton(
+                          onPressed: _loading ? null : _saveConfig,
+                          child: const Text('Save'),
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      ShadButton.outline(
-                        onPressed: _loading
-                            ? null
-                            : () {
-                                _configController.text = _configManager.readConfig();
-                                setState(() => _editing = false);
-                              },
-                        child: const Text('Cancel'),
+                      Semantics(
+                        button: true,
+                        label: 'Cancel SSH Config Edit',
+                        child: ShadButton.outline(
+                          onPressed: _loading
+                              ? null
+                              : () {
+                                  _configController.text = _configManager.readConfig();
+                                  setState(() => _editing = false);
+                                },
+                          child: const Text('Cancel'),
+                        ),
                       ),
                     ],
                   ],
@@ -2213,10 +2382,14 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               children: [
                 const Text('Known Hosts'),
                 const SizedBox(width: 8),
-                ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  onPressed: _openKnownHostsFile,
-                  child: const Icon(LucideIcons.folderOpen, size: 14),
+                Semantics(
+                  button: true,
+                  label: 'Open Known Hosts File',
+                  child: ShadButton.ghost(
+                    size: ShadButtonSize.sm,
+                    onPressed: _openKnownHostsFile,
+                    child: const Icon(LucideIcons.folderOpen, size: 14),
+                  ),
                 ),
               ],
             ),
@@ -2240,30 +2413,38 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                               onSubmitted: adding ? null : (_) => _addKnownHost(),
                               enabled: !adding,
                               trailing: _hostController.text.isNotEmpty && !adding
-                                  ? ShadButton.ghost(
-                                      size: ShadButtonSize.sm,
-                                      onPressed: () {
-                                        _hostController.clear();
-                                      },
-                                      child: const Icon(LucideIcons.x, size: 14),
+                                  ? Semantics(
+                                      button: true,
+                                      label: 'Clear host input',
+                                      child: ShadButton.ghost(
+                                        size: ShadButtonSize.sm,
+                                        onPressed: () {
+                                          _hostController.clear();
+                                        },
+                                        child: const Icon(LucideIcons.x, size: 14),
+                                      ),
                                     )
                                   : null,
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        ShadButton(
-                          onPressed: adding || _hostsLoading ? null : _addKnownHost,
-                          leading: adding
-                              ? SizedBox.square(
-                                  dimension: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: ShadTheme.of(context).colorScheme.primaryForeground,
-                                  ),
-                                )
-                              : null,
-                          child: const Text('Add'),
+                        Semantics(
+                          button: true,
+                          label: 'Add Host to known_hosts',
+                          child: ShadButton(
+                            onPressed: adding || _hostsLoading ? null : _addKnownHost,
+                            leading: adding
+                                ? SizedBox.square(
+                                    dimension: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: ShadTheme.of(context).colorScheme.primaryForeground,
+                                    ),
+                                  )
+                                : null,
+                            child: const Text('Add'),
+                          ),
                         ),
                       ],
                     ),

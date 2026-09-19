@@ -113,7 +113,8 @@ class SshKeyException implements Exception {
   final String? rawDetail;
 
   @override
-  String toString() => 'SshKeyException(${code.name}): $message';
+  String toString() =>
+      rawDetail == null ? 'SshKeyException(${code.name}): $message' : 'SshKeyException(${code.name}): $message ($rawDetail)';
 }
 
 // ---------------------------------------------------------------------------
@@ -533,8 +534,9 @@ class SshKeyManager {
         if (await tempPub.exists()) {
           await tempPub.delete();
         }
-      } catch (_) {
-        // Ignore cleanup errors
+      } catch (e) {
+        // Best-effort cleanup of temporary files; failures are non-fatal.
+        stderr.writeln('Notice: temp key file cleanup failed: $e');
       }
     }
   }

@@ -26,13 +26,6 @@ import 'settings_service.dart';
 const String _kServiceName = 'ssh-agent';
 
 // ---------------------------------------------------------------------------
-// Access-flag constants not exported by package:win32 6.4.0
-// ---------------------------------------------------------------------------
-
-/// Access the service configuration information. Required by QueryServiceConfig.
-const int _serviceQueryConfig = 0x0001;
-
-// ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
 
@@ -243,36 +236,6 @@ int _startServiceRaw(SC_HANDLE svc) {
   return result.error.code;
 }
 
-/// Queries the `dwStartType` via `QueryServiceConfig`.
-///
-/// Uses a generous fixed-size buffer (8 KiB) to avoid the two-call
-/// pattern, which was unreliable through the win32 6.4.0 wrapper
-/// (`resolveGetLastError()` + `GetLastError()` ordering caused
-/// `ERROR_INSUFFICIENT_BUFFER` even with correct `pcbBytesNeeded`).
-int _queryStartTypeRaw(SC_HANDLE svc) {
-  return using((arena) {
-    const bufSize = 8192;
-    final bufPtr = arena.allocate<Uint8>(bufSize);
-    final bytesNeeded = arena.allocate<Uint32>(sizeOf<Uint32>());
-
-    final result = QueryServiceConfig(
-      svc,
-      bufPtr.cast<QUERY_SERVICE_CONFIG>(),
-      bufSize,
-      bytesNeeded,
-    );
-
-    if (result.error.isError) {
-      throw SshServiceException(
-        SshServiceErrorCode.operationFailed,
-        'QueryServiceConfig failed.',
-        rawDetail: 'error ${result.error.code}',
-      );
-    }
-
-    return bufPtr.cast<QUERY_SERVICE_CONFIG>().ref.dwStartType;
-  });
-}
 
 // ---------------------------------------------------------------------------
 // SshServiceManager
@@ -626,31 +589,6 @@ class SshServiceManager {
         return;
       }
       rethrow;
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // QueryServiceConfig helper (for verification / QA)
-  // -----------------------------------------------------------------------
-
-  /// Reads the start type from the service record via `QueryServiceConfig`.
-  ///
-  /// Returns the raw `SERVICE_START_TYPE` value:
-  ///   0 = BOOT_START, 1 = SYSTEM_START, 2 = AUTO_START,
-  ///   3 = DEMAND_START, 4 = DISABLED.
-  Future<int> queryStartType() async {
-    await _assertPresence();
-
-    final scm = _openScm();
-    try {
-      final svc = _openService(scm, _serviceQueryConfig);
-      try {
-        return _queryStartTypeRaw(svc);
-      } finally {
-        svc.close();
-      }
-    } finally {
-      scm.close();
     }
   }
 }

@@ -47,6 +47,14 @@ void main(List<String> args) async {
 // App root
 // ---------------------------------------------------------------------------
 
+/// Builds the shadcn theme for a given brightness.
+///
+/// shadcn exposes exactly one colour scheme per brightness -- slate -- so both
+/// branches only need to set [ShadThemeData.brightness]; the package then picks
+/// `ShadSlateColorScheme.light()` or `.dark()` on its own.
+ShadThemeData _themeFor(Brightness brightness) =>
+    ShadThemeData(brightness: brightness);
+
 class SshPanelApp extends StatelessWidget {
   const SshPanelApp({super.key});
 
@@ -54,6 +62,15 @@ class SshPanelApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ShadApp(
       title: 'SSH Panel',
+      // Without an explicit dark theme, ShadApp falls back to
+      // ShadThemeData(brightness: Brightness.light) for every platform
+      // brightness, so the app ignored the Windows setting entirely and was
+      // always light.
+      theme: _themeFor(Brightness.light),
+      darkTheme: _themeFor(Brightness.dark),
+      // Follow the system, which is the Windows app theme setting. App-only
+      // would pin it to light; dark would ignore the user's choice.
+      themeMode: ThemeMode.system,
       home: const SshPanelShell(),
     );
   }

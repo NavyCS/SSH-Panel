@@ -14,6 +14,8 @@ import 'services/ssh_domains.dart';
 import 'services/ssh_keys.dart';
 import 'services/ssh_service.dart';
 import 'shared/dialogs/passphrase_dialog.dart';
+import 'shared/plural.dart';
+import 'shared/widgets/agent_status_badge.dart';
 import 'shared/widgets/action_row.dart';
 import 'shared/widgets/disabled_action_wrapper.dart';
 import 'shared/widgets/host_status_badge.dart';
@@ -470,7 +472,7 @@ class _ServiceTabState extends State<ServiceTab> {
     super.dispose();
   }
 
-  String _statusLabel(SshServiceState state) => ServiceController.statusLabel(state);
+  
 
   @override
   Widget build(BuildContext context) {
@@ -502,13 +504,7 @@ class _ServiceTabState extends State<ServiceTab> {
                   const Text('Agent Status'),
                   const SizedBox(width: 8),
                   if (!_controller.isLoading)
-                    ShadBadge(
-                      child: Text(
-                        _controller.status != null
-                            ? _statusLabel(_controller.status!)
-                            : 'Unknown',
-                      ),
-                    ),
+                    AgentStatusBadge(state: _controller.status),
                 ],
               ),
               description: const Text('Current state of the ssh-agent service'),
@@ -1377,7 +1373,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 ),
               ],
             ),
-            description: Text('${_controller.keyFiles.length} file(s) in ~/.ssh'),
+            description: Text('${plural(_controller.keyFiles.length, 'file')} in ~/.ssh'),
             child: _controller.isInitialLoad
                 ? const Padding(
                     padding: EdgeInsets.all(12),
@@ -1428,7 +1424,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           // ---- Loaded keys card ----
           ShadCard(
             title: const Text('Loaded Keys'),
-            description: Text('${_controller.loadedKeys.length} key(s) in agent'),
+            description: Text('${plural(_controller.loadedKeys.length, 'key')} in agent'),
             child: _controller.isInitialLoad
                 ? const Padding(
                     padding: EdgeInsets.all(12),
@@ -1520,7 +1516,8 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               ],
             ),
             description: Text(
-              '${_controller.authorizedKeys.length} authorized key(s) in ~/.ssh/authorized_keys',
+              '${plural(_controller.authorizedKeys.length, 'authorized key')} in '
+                  '~/.ssh/authorized_keys',
             ),
             child: _controller.isInitialLoad
                 ? const Padding(
@@ -2022,7 +2019,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               ],
             ),
             description: Text(
-              '${_controller.knownHosts.length} host(s) in '
+              '${plural(_controller.knownHosts.length, 'host')} in '
               '${_shortPath(_controller.knownHostsPath)}',
             ),
             child: Column(

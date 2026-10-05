@@ -9,6 +9,7 @@ import 'package:shadcn_ui/shadcn_ui.dart';
 import 'features/domains/domains_controller.dart';
 import 'features/keys/keys_controller.dart';
 import 'features/service/service_controller.dart';
+import 'services/path_guard.dart';
 import 'services/settings_service.dart';
 import 'services/ssh_domains.dart';
 import 'services/ssh_keys.dart';
@@ -1004,6 +1005,11 @@ class _KeysTabState extends State<KeysTab> {
   void _openSshFolder() {
     final dir = _controller.sshDirectory;
     if (dir.isEmpty) return;
+    if (!PathGuard.isAllowed(dir)) {
+      ToastService.instance.showErrorMessage(
+          'Refusing to open a folder outside your user profile.');
+      return;
+    }
     Process.run('explorer', [dir], runInShell: false);
   }
 
@@ -1663,12 +1669,22 @@ class _DomainsTabState extends State<DomainsTab> {
   void _openSshFolder() {
     final dir = _controller.sshDirectory;
     if (dir.isEmpty) return;
+    if (!PathGuard.isAllowed(dir)) {
+      ToastService.instance.showErrorMessage(
+          'Refusing to open a folder outside your user profile.');
+      return;
+    }
     Process.run('explorer', [dir], runInShell: false);
   }
 
   void _openKnownHostsFile() {
     final path = _controller.knownHostsPath;
     if (path.isEmpty) return;
+    if (!PathGuard.isAllowed(path)) {
+      ToastService.instance.showErrorMessage(
+          'Refusing to open a file outside your user profile.');
+      return;
+    }
     Process.run('explorer', ['/select,', path], runInShell: false);
   }
 
@@ -1780,10 +1796,10 @@ class _DomainsTabState extends State<DomainsTab> {
   Future<void> _addKnownHost() async {
     final host = _hostController.text.trim();
     if (host.isEmpty) return;
-    if (!SshConfigManager.isValidHost(host)) {
+    final hostProblem = SshConfigManager.isValidHostDetailed(host);
+    if (hostProblem != null) {
       if (!mounted) return;
-      ToastService.instance
-          .showErrorMessage('Invalid host name: "$host".');
+      ToastService.instance.showErrorMessage('Invalid host name: $hostProblem');
       return;
     }
 

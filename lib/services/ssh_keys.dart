@@ -21,6 +21,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'file_permissions.dart';
+
 // ---------------------------------------------------------------------------
 // Key algorithm types
 // ---------------------------------------------------------------------------
@@ -199,40 +201,6 @@ class SshKeyManager {
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
-
-  /// Restricts [directory] so only the current user and SYSTEM can read it.
-  ///
-  /// Files created inside afterwards inherit these entries, which is what
-  /// protects the decrypted key and the passphrase helper: they no longer pick
-  /// up whatever access the user profile happens to grant.
-  ///
-  /// Best-effort. If `icacls` is unavailable the files are still created and
-  /// the operation still works -- the caller only loses the hardening, so
-  /// failing loudly here would be worse than proceeding.
-  Future<void> _restrictToCurrentUser(Directory directory) async {
-    final user = Platform.environment['USERNAME'];
-    if (user == null || user.isEmpty) return;
-    try {
-      // /inheritance:r drops the inherited entries; (OI)(CI) makes the grants
-      // inheritable so files created inside are covered too. SYSTEM is
-      // referenced by SID so this does not depend on the OS language.
-      await Process.run(
-        'icacls.exe',
-        [
-          directory.path,
-          '/inheritance:r',
-          '/grant:r',
-          '$user:(OI)(CI)(F)',
-          '/grant:r',
-          '*S-1-5-18:(OI)(CI)(F)',
-        ],
-        runInShell: false,
-      );
-    } catch (e) {
-      stderr.writeln('Warning: could not restrict permissions on the '
-          'temporary directory: $e');
-    }
-  }
 
   /// Resolves `~/.ssh` using `USERPROFILE`.
   ///
@@ -557,7 +525,13 @@ class SshKeyManager {
     File? tempFile;
     try {
       workDir = Directory.systemTemp.createTempSync('ssh_panel_');
-      await _restrictToCurrentUser(workDir);
+      // Restrict the staging directory so only the current user and SYSTEM can
+      // read it. Everything this method writes lands inside it -- the decrypted
+      // private key, the passphrase, and the helper that hands the passphrase
+      // over -- so they stop picking up whatever access the profile happens to
+      // grant. Best-effort: if `icacls` is unavailable the operation still
+      // works, it just loses the hardening.
+      await FilePermissions.restrictToOwner(workDir);
 
       final sep = Platform.pathSeparator;
       tempFile = File('${workDir.path}${sep}key');
@@ -756,11 +730,12 @@ class SshKeyManager {
       );
     }
 
-    // Ensure ~/.ssh exists.
+    // Ensure ~/.ssh exists. OpenSSH expects it to be private to its owner, so
+    // when this call is the one that creates it, restrict it. An existing
+    // directory is left alone: a user who deliberately widened the permissions
+    // on it should not have that undone by generating a key.
     final directory = Directory(dir);
-    if (!await directory.exists()) {
-      await directory.create(recursive: true);
-    }
+    await FilePermissions.ensurePrivateDirectory(directory);
 
     // Use algorithm default name if name is empty.
     final effectiveName = name.trim().isEmpty ? algorithm.defaultName : name.trim();

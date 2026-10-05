@@ -431,12 +431,25 @@ class SshServiceManager {
 
   /// Runs an `sc.exe` command with administrator privileges via UAC
   /// for `modePerAction` elevation. Waits for execution to finish.
-  Future<void> _runElevatedSc(String scArgs) async {
+  ///
+  /// [args] is a list rather than a pre-joined string. It used to be
+  /// interpolated into a single quoted PowerShell argument
+  /// (`-ArgumentList "$scArgs"`), which only stayed safe because every caller
+  /// passed a literal from this file. Taking a list makes that structural: each
+  /// element is emitted as its own PowerShell single-quoted string, where the
+  /// only character needing care is the quote itself. A value containing a
+  /// space, a semicolon or a quote therefore stays one argument instead of
+  /// becoming extra commands.
+  Future<void> _runElevatedSc(List<String> args) async {
+    final argList = args
+        .map((arg) => "'${arg.replaceAll("'", "''")}'")
+        .join(',');
     final result = await Process.run('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      'Start-Process sc.exe -ArgumentList "$scArgs" -Verb RunAs -Wait -WindowStyle Hidden',
+      'Start-Process sc.exe -ArgumentList @($argList) -Verb RunAs -Wait '
+          '-WindowStyle Hidden',
     ]);
     if (result.exitCode != 0) {
       throw SshServiceException(
@@ -552,7 +565,7 @@ class SshServiceManager {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
       final mode = await SettingsService.getElevationMode();
       if (mode == SettingsService.modePerAction) {
-        await _runElevatedSc('start $_kServiceName');
+        await _runElevatedSc(['start', _kServiceName]);
         return await _waitForAgentPipe(cancellationToken: cancellationToken);
       }
       rethrow;
@@ -662,7 +675,7 @@ class SshServiceManager {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
       final mode = await SettingsService.getElevationMode();
       if (mode == SettingsService.modePerAction) {
-        await _runElevatedSc('stop $_kServiceName');
+        await _runElevatedSc(['stop', _kServiceName]);
         // Poll until stopped or timeout
         final deadline = DateTime.now().add(const Duration(seconds: 30));
         while (DateTime.now().isBefore(deadline)) {
@@ -734,7 +747,7 @@ class SshServiceManager {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
       final mode = await SettingsService.getElevationMode();
       if (mode == SettingsService.modePerAction) {
-        await _runElevatedSc('config $_kServiceName start= $startArg');
+        await _runElevatedSc(['config', _kServiceName, 'start=', startArg]);
         return;
       }
       rethrow;

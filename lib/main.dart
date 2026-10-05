@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'features/domains/domains_controller.dart';
 import 'features/service/service_controller.dart';
 import 'services/agent_state.dart';
 import 'services/settings_service.dart';
@@ -1683,16 +1684,12 @@ class DomainsTab extends StatefulWidget {
 }
 
 class _DomainsTabState extends State<DomainsTab> {
-  final _configManager = SshConfigManager();
+/// State and file I/O live in [DomainsController]. Only the dialogs stay
+  /// here, because they need a [BuildContext].
+  final _controller = DomainsController();
+
   late TextEditingController _configController;
   late final TextEditingController _hostController;
-  List<Map<String, String>> _knownHosts = [];
-  bool _loading = false;
-  bool _editing = false;
-  bool _hostsLoading = false;
-  final ValueNotifier<bool> _adding = ValueNotifier<bool>(false);
-  final Map<String, String?> _hostStatus = {};
-  final Set<String> _checkingHosts = {};
 
   @override
   void initState() {
@@ -1704,111 +1701,39 @@ class _DomainsTabState extends State<DomainsTab> {
 
   @override
   void dispose() {
-    // _adding was never disposed, so its listeners outlived the State on every
-    // tab switch.
-    _adding.dispose();
+    _controller.dispose();
     _configController.dispose();
     _hostController.dispose();
     super.dispose();
   }
 
+  /// Reads config + known_hosts, then mirrors the config text into the field.
+  ///
+  /// The controller holds the text as the source of truth; the
+  /// TextEditingController is only its view, so it has to be re-synced.
   Future<void> _refresh() async {
-    setState(() {
-      _loading = true;
-    });
-    try {
-      final config = _configManager.readConfig();
-      final hosts = _configManager.getKnownHosts();
-      if (!mounted) return;
-      setState(() {
-        _configController.text = config;
-        _knownHosts = hosts;
-        _loading = false;
-      });
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
+    await _controller.refresh();
+    if (!mounted) return;
+    if (_configController.text != _controller.configText) {
+      _configController.text = _controller.configText;
     }
   }
 
-  Future<void> _refreshHosts() async {
-    setState(() {
-      _hostsLoading = true;
-    });
-    try {
-      final hosts = _configManager.getKnownHosts();
-      if (!mounted) return;
-      final currentHosts = hosts.map((h) => h['host']!).toSet();
-      _hostStatus.removeWhere((key, _) => !currentHosts.contains(key));
-      setState(() {
-        _knownHosts = hosts;
-        _hostsLoading = false;
-      });
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _hostsLoading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _hostsLoading = false);
-    }
-  }
+  Future<void> _saveConfig() => _controller.saveConfig(_configController.text);
 
-  void _saveConfig() {
-    setState(() {
-      _loading = true;
-    });
-    try {
-      _configManager.writeConfig(_configController.text);
-      setState(() {
-        _loading = false;
-        _editing = false;
-      });
-      if (mounted) {
-        ToastService.instance.showSuccess('Config saved.');
-      }
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
-  }
-
-void _openSshFolder() {
-    final dir = _configManager.sshDirectory;
+  void _openSshFolder() {
+    final dir = _controller.sshDirectory;
     if (dir.isEmpty) return;
     Process.run('explorer', [dir], runInShell: false);
   }
 
   void _openKnownHostsFile() {
-    final path = _configManager.knownHostsPath;
+    final path = _controller.knownHostsPath;
     if (path.isEmpty) return;
     Process.run('explorer', ['/select,', path], runInShell: false);
   }
 
-  String _shortPath(String path) {
-    final home = _configManager.sshDirectory;
-    if (home.isNotEmpty && path.startsWith(home)) {
-      return '~${path.substring(home.length)}';
-    }
-    return path;
-  }
+  String _shortPath(String path) => _controller.shortPath(path);
 
   Future<void> _removeKnownHost(String host, String keyType) async {
     final confirmed = await showShadDialog<bool>(
@@ -1839,100 +1764,13 @@ void _openSshFolder() {
       ),
     );
     if (confirmed != true) return;
-
-    setState(() {
-      _hostsLoading = true;
-    });
-    try {
-      _configManager.removeKnownHost(host, keyType);
-      await _refreshHosts();
-      if (mounted) {
-        ToastService.instance.showSuccess('Known host entry removed.');
-      }
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _hostsLoading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _hostsLoading = false);
-    }
+    await _controller.removeKnownHost(host, keyType);
   }
 
-  Future<void> _checkHost(String host) async {
-    if (_checkingHosts.contains(host)) return;
-    _checkingHosts.add(host);
-    setState(() {
-      _hostStatus[host] = null;
-    });
-    try {
-      final keys = await _configManager.scanHost(host);
-      if (!mounted) return;
-      final keyTypes = keys
-          .map((line) => line.split(RegExp(r'\s+')).length > 1
-              ? line.split(RegExp(r'\s+'))[1]
-              : '')
-          .where((t) => t.isNotEmpty)
-          .toSet()
-          .toList();
-      setState(() {
-        _hostStatus[host] = keys.isEmpty
-            ? 'Unreachable'
-            : keyTypes.join(', ');
-      });
-    } on SshConfigException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _hostStatus[host] = 'Error: ${e.message}';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _hostStatus[host] = 'Error';
-      });
-    } finally {
-      _checkingHosts.remove(host);
-    }
-  }
+  Future<void> _checkHost(String host) => _controller.checkHost(host);
 
-  Future<List<Map<String, String>>?> _scanAvailableHostKeys(String host) async {
-    _adding.value = true;
-    if (mounted) setState(() {});
-
-    List<String> keyLines;
-    try {
-      keyLines = await _configManager.scanHostKeys(host);
-    } catch (e) {
-      if (!mounted) return null;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      _adding.value = false;
-      return null;
-    }
-
-    if (!mounted) return null;
-    _adding.value = false;
-
-    final entries = <Map<String, String>>[];
-    for (final line in keyLines) {
-      final tokens = line.split(RegExp(r'\s+'));
-      final keyType = tokens.length > 1 ? tokens[1] : '';
-      entries.add(<String, String>{'keyType': keyType, 'line': line});
-    }
-
-    final existingKeyTypes = _knownHosts
-        .where((h) => h['host'] == host)
-        .map((h) => h['keyType']!)
-        .toSet();
-
-    return entries
-        .where((e) => !existingKeyTypes.contains(e['keyType']))
-        .toList();
-  }
+  Future<List<Map<String, String>>?> _scanAvailableHostKeys(String host) =>
+      _controller.scanAvailableHostKeys(host);
 
   Future<List<String>?> _selectKeysToAdd(String host, List<Map<String, String>> available) async {
     final selected = List.generate(available.length, (i) => i).toSet();
@@ -2023,27 +1861,20 @@ void _openSshFolder() {
     final chosenLines = await _selectKeysToAdd(host, available);
     if (chosenLines == null || chosenLines.isEmpty) return;
 
-    setState(() {
-      _hostsLoading = true;
-    });
-    try {
-      await _configManager.writeKnownHostKeys(host, chosenLines);
+    await _controller.addKnownHostKeys(host, chosenLines);
+    if (mounted) {
       _hostController.clear();
-      await _refreshHosts();
-      if (mounted) {
-        ToastService.instance.showSuccess('Known host added.');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
+      ToastService.instance.showSuccess('Known host added.');
     }
   }
 
 Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
     final host = entry['host']!;
     final keyType = entry['keyType']!;
+    // Read the controller once per row instead of once per reference.
+    final status = _controller.hostStatus(host);
+    final isChecking = _controller.isChecking(host);
+    final isHostsLoading = _controller.isHostsLoading;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -2075,17 +1906,17 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
             actions: [
               RowAction(
                 label: 'Check',
-                onPressed: _hostsLoading || _checkingHosts.contains(host)
+                onPressed: isHostsLoading || isChecking
                     ? null
                     : () => _checkHost(host),
                 enabledTooltip: 'Scan host keys for $host',
-                disabledTooltip: _checkingHosts.contains(host)
+                disabledTooltip: isChecking
                     ? 'Already checking $host'
                     : 'Wait for the current operation to finish',
               ),
               RowAction(
                 label: 'Remove',
-                onPressed: _hostsLoading
+                onPressed: isHostsLoading
                     ? null
                     : () => _removeKnownHost(host, keyType),
                 enabledTooltip: 'Remove $host from known_hosts',
@@ -2094,21 +1925,21 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
             ],
           ),
           const SizedBox(width: 6),
-          if (_hostStatus[host] != null)
+          if (status != null)
             // Not a button. It used to be wrapped in ShadButton.ghost with an
             // empty onPressed, which put a dead control in the tab order and
             // announced it as a button to screen readers. The status is read
             // only; the tooltip below carries the detail instead.
             ShadTooltip(
               builder: (context) => Text(
-                _hostStatus[host] == 'Unreachable'
+                status == 'Unreachable'
                     ? 'No response from $host. Check the hostname and that'
                         ' port 22 is reachable, then try again.'
-                    : _hostStatus[host]!,
+                    : status,
               ),
               child: Semantics(
-                label: 'Host status for $host: ${_hostStatus[host]}',
-                child: HostStatusBadge(status: _hostStatus[host]!),
+                label: 'Host status for $host: $status',
+                child: HostStatusBadge(status: status),
               ),
             ),
         ],
@@ -2118,6 +1949,16 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
 
   @override
   Widget build(BuildContext context) {
+    // Rebuild on every controller notification. The config field is a
+    // TextEditingController, so its own edits do not rebuild the tab, which is
+    // what keeps typing in the textarea smooth.
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final theme = ShadTheme.of(context);
 
   return ListView(
@@ -2151,26 +1992,29 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                       button: true,
                       label: 'Reload SSH Config',
                       child: ShadButton.outline(
-                        onPressed: _loading ? null : _refresh,
+                        onPressed: _controller.isLoading ? null : _refresh,
                         child: const Text('Reload'),
                       ),
                     ),
                     const SizedBox(width: 8),
-                    if (!_editing)
+                    if (!_controller.isEditing)
                       Semantics(
                         button: true,
                         label: 'Edit SSH Config',
                         child: ShadButton.outline(
-                          onPressed: _loading ? null : () => setState(() => _editing = true),
+                          onPressed: _controller.isLoading
+                              ? null
+                              : _controller.beginEditing,
                           child: const Text('Edit'),
                         ),
                       ),
-                    if (_editing) ...[
+                    if (_controller.isEditing) ...[
                       Semantics(
                         button: true,
                         label: 'Save SSH Config',
                         child: ShadButton(
-                          onPressed: _loading ? null : _saveConfig,
+                          onPressed:
+                              _controller.isLoading ? null : _saveConfig,
                           child: const Text('Save'),
                         ),
                       ),
@@ -2179,11 +2023,15 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                         button: true,
                         label: 'Cancel SSH Config Edit',
                         child: ShadButton.outline(
-                          onPressed: _loading
+                          onPressed: _controller.isLoading
                               ? null
                               : () {
-                                  _configController.text = _configManager.readConfig();
-                                  setState(() => _editing = false);
+                                  // Discard edits by re-reading the value the
+                                  // controller still holds, which is the
+                                  // last one read from disk.
+                                  _configController.text =
+                                      _controller.configText;
+                                  _controller.cancelEditing();
                                 },
                           child: const Text('Cancel'),
                         ),
@@ -2195,7 +2043,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
             ),
             child: Padding(
               padding: const EdgeInsets.only(top: 12),
-              child: _loading
+              child: _controller.isLoading
                   ? const Padding(
                       padding: EdgeInsets.all(12),
                       child: SizedBox(
@@ -2208,7 +2056,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                       controller: _configController,
                       placeholder: const Text('No config file found'),
                       minHeight: 120,
-                      readOnly: !_editing,
+                      readOnly: !_controller.isEditing,
                       resizable: false,
                     ),
             ),
@@ -2234,15 +2082,21 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               ],
             ),
             description: Text(
-              '${_knownHosts.length} host(s) in ${_shortPath(_configManager.knownHostsPath)}',
+              '${_controller.knownHosts.length} host(s) in '
+              '${_shortPath(_controller.knownHostsPath)}',
             ),
             child: Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: _adding,
-                    builder: (context, adding, _) => Row(
+                  child: Builder(
+                    builder: (context) {
+                      // Was a ValueListenableBuilder over a ValueNotifier that
+                      // existed only to trigger a setState from an async gap.
+                      // The controller already rebuilds this whole subtree, so
+                      // reading the flag is enough.
+                      final adding = _controller.isScanning;
+                      return Row(
                       children: [
                         Expanded(
                           child: ListenableBuilder(
@@ -2250,7 +2104,8 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                             builder: (context, _) => ShadInput(
                               controller: _hostController,
                               placeholder: const Text('example.com'),
-                              onSubmitted: adding ? null : (_) => _addKnownHost(),
+                              onSubmitted:
+                                  adding ? null : (_) => _addKnownHost(),
                               enabled: !adding,
                               trailing: _hostController.text.isNotEmpty && !adding
                                   ? Semantics(
@@ -2273,7 +2128,9 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                           button: true,
                           label: 'Add Host to known_hosts',
                           child: ShadButton(
-                            onPressed: adding || _hostsLoading ? null : _addKnownHost,
+                            onPressed: adding || _controller.isHostsLoading
+                                ? null
+                                : _addKnownHost,
                             leading: adding
                                 ? SizedBox.square(
                                     dimension: 14,
@@ -2287,10 +2144,11 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                           ),
                         ),
                       ],
-                    ),
-                  ),
+                    );
+                  },
                 ),
-                _hostsLoading
+              ),
+              _controller.isHostsLoading
                     ? const Padding(
                         padding: EdgeInsets.all(12),
                         child: SizedBox(
@@ -2299,7 +2157,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       )
-                    : _knownHosts.isEmpty
+                    : _controller.knownHosts.isEmpty
                         ? Padding(
                             padding: const EdgeInsets.all(12),
                             child: Text(
@@ -2309,7 +2167,7 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                           )
                         : Column(
                             children: [
-                              for (final entry in _knownHosts)
+                              for (final entry in _controller.knownHosts)
                                 // Composite key: known_hosts entries are
                                 // Map<String, String>, which has no identity
                                 // of its own, so host+keyType together stand

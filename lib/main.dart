@@ -34,10 +34,16 @@ void main(List<String> args) async {
   // Global uncaught-error handler: route every unhandled Flutter/async
   // error to the toaster instead of the red debug screen. Never rethrows -
   // the handler only reports, it does not change control flow.
+  //
+  // The stack is also written to stderr. Without it the only trace of a
+  // startup failure is the toast, which carries the exception message and
+  // nothing about where it came from. stderr is invisible in a normal launch.
   FlutterError.onError = (FlutterErrorDetails details) {
+    stderr.writeln('FlutterError: ${details.exception}\n${details.stack ?? StackTrace.empty}');
     ToastService.instance.handleError(details.exception, details.stack ?? StackTrace.empty);
   };
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    stderr.writeln('PlatformError: $error\n$stack');
     ToastService.instance.handleError(error, stack);
     return true;
   };
@@ -610,6 +616,17 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
               // select renders empty instead of asserting a value we did not
               // read. The helper text below explains that state.
               Widget selectWidget = ShadSelect<StartupType>(
+                // startupType is null when the SCM could not be queried --
+                // OpenSSH absent, or the SCM refused. ShadSelect dereferences
+                // its placeholder unconditionally when the value is null
+                // (select.dart: `result = widget.placeholder!`), so the
+                // placeholder is required here, not decorative: without it the
+                // release build throws "Null check operator used on a null
+                // value" instead of showing the unknown state.
+                placeholder: Text(
+                  'Unknown',
+                  style: theme.textTheme.muted,
+                ),
                 initialValue: _controller.startupType,
                 enabled: !_controller.isStartupTypeLoading && adminEnabled,
                 options: StartupType.values.map((type) {

@@ -121,10 +121,15 @@ class ToastService {
   }
 
   /// Shows a primary toast for an informational message.
-  void showInfo(String message) {
+  ///
+  /// [title] defaults to "Info", which reads as a placeholder rather than
+  /// information. Pass one when the toast needs to say what the message is
+  /// about -- the host a scan was run against, say -- because the description
+  /// alone leaves the reader guessing which of several actions produced it.
+  void showInfo(String message, {String title = 'Info'}) {
     _show(
       ShadToast(
-        title: const Text('Info'),
+        title: Text(title),
         description: Text(message),
       ),
     );

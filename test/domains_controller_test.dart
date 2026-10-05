@@ -43,14 +43,16 @@ void main() {
       expect(DomainsController.parseKeyLine('onlyhost'), isNull);
     });
 
-    test('returns null for a comment line rather than reading prose as a key type',
-        () {
-      // known_hosts files carry # comments. The second whitespace-separated
-      // field of "# some note" is prose, so parsing it produced a phantom
-      // algorithm named after the first word.
-      expect(DomainsController.parseKeyLine('# managed by ops'), isNull);
-      expect(DomainsController.parseKeyLine('   # indented comment'), isNull);
-    });
+    test(
+      'returns null for a comment line rather than reading prose as a key type',
+      () {
+        // known_hosts files carry # comments. The second whitespace-separated
+        // field of "# some note" is prose, so parsing it produced a phantom
+        // algorithm named after the first word.
+        expect(DomainsController.parseKeyLine('# managed by ops'), isNull);
+        expect(DomainsController.parseKeyLine('   # indented comment'), isNull);
+      },
+    );
 
     test('returns null for @cert-authority marker lines', () {
       // These are valid known_hosts entries whose fields are shifted by the
@@ -184,12 +186,102 @@ void main() {
       final controller = DomainsController();
       addTearDown(controller.dispose);
 
-      expect(controller.shortPath(r'C:\Windows\System32\foo'),
-          r'C:\Windows\System32\foo');
+      expect(
+        controller.shortPath(r'C:\Windows\System32\foo'),
+        r'C:\Windows\System32\foo',
+      );
     });
 
     test('dispose does not throw', () {
       expect(DomainsController().dispose, returnsNormally);
+    });
+  });
+
+  group('the check toast names every algorithm', () {
+    // Clicking Check used to answer only with a count on the row badge, and put
+    // the names behind a tooltip that needed the mouse over it. These pin the
+    // message that replaces that.
+
+    test('lists every algorithm, one per line', () {
+      final message = DomainsController.checkResultMessage([
+        'ssh-ed25519',
+        'ecdsa-sha2-nistp256',
+        'ssh-rsa',
+      ]);
+      expect(message, contains('3 key types'));
+      expect(message, contains('ssh-ed25519'));
+      expect(message, contains('ecdsa-sha2-nistp256'));
+      expect(message, contains('ssh-rsa'));
+      // One per line: a comma-joined run of five names wraps into an
+      // unreadable block in a narrow toast.
+      expect(message.split('\n'), hasLength(4));
+    });
+
+    test('uses the singular for one algorithm', () {
+      expect(
+        DomainsController.checkResultMessage(['ssh-ed25519']),
+        contains('1 key type'),
+      );
+      expect(
+        DomainsController.checkResultMessage(['ssh-ed25519']),
+        isNot(contains('1 key types')),
+      );
+    });
+
+    test('does not drop a name when a host offers many', () {
+      const types = [
+        'ssh-ed25519',
+        'ecdsa-sha2-nistp256',
+        'ssh-dss',
+        'ecdsa-sha2-nistp384',
+        'sk-ecdsa-sha2-nistp256@openssh.com',
+      ];
+      final message = DomainsController.checkResultMessage(types);
+      for (final type in types) {
+        expect(message, contains(type));
+      }
+      expect(message.split('\n'), hasLength(6));
+    });
+
+    test('the unreachable message says the scan ran and got no answer', () {
+      // Distinguishes "the host is silent" from "the scan broke", which the old
+      // bare "Unreachable" badge did not.
+      expect(DomainsController.unreachableMessage, contains('No response'));
+      expect(DomainsController.unreachableMessage, contains('port 22'));
+    });
+
+    test('checkHost records the full list, not a count', () {
+      // The status string is what the badge and the tooltip both read, so it has
+      // to carry every name or the toast would be the only place they survive.
+      final controller = DomainsController(
+        configManager: _FakeConfigManager(
+          scanResult: const [
+            'example.com ssh-ed25519 AAAAC3',
+            'example.com ecdsa-sha2-nistp256 AAAA',
+            'example.com ssh-rsa AAAAB3',
+          ],
+        ),
+      );
+      addTearDown(controller.dispose);
+
+      return controller.checkHost('example.com').then((_) {
+        expect(
+          controller.hostStatus('example.com'),
+          'ssh-ed25519, ecdsa-sha2-nistp256, ssh-rsa',
+        );
+        expect(controller.isChecking('example.com'), isFalse);
+      });
+    });
+
+    test('checkHost records Unreachable when the host says nothing', () {
+      final controller = DomainsController(
+        configManager: _FakeConfigManager(scanResult: const []),
+      );
+      addTearDown(controller.dispose);
+
+      return controller.checkHost('example.com').then((_) {
+        expect(controller.hostStatus('example.com'), 'Unreachable');
+      });
     });
   });
 }
@@ -201,13 +293,33 @@ void main() {
 /// be tested, and overriding beats redirecting `USERPROFILE` at the real
 /// `~/.ssh/known_hosts`.
 class _FakeConfigManager implements SshConfigManager {
-  _FakeConfigManager({this.shouldFail = false, this.throwGeneric = false});
+  _FakeConfigManager({
+    this.shouldFail = false,
+    this.throwGeneric = false,
+    this.scanResult = const [],
+  });
 
   /// Throw the expected [SshConfigException].
   final bool shouldFail;
 
   /// Throw something the controller does not specifically expect.
   final bool throwGeneric;
+
+  /// What `ssh-keyscan` pretends to have found. Empty means the host answered
+  /// with nothing, which the controller reports as `Unreachable`.
+  final List<String> scanResult;
+
+  @override
+  Future<List<String>> scanHost(String host) async {
+    if (throwGeneric) throw const FormatException('unexpected');
+    if (shouldFail) {
+      throw SshConfigException(
+        SshConfigErrorCode.keyscanFailed,
+        'Host $host is unreachable — no keys found.',
+      );
+    }
+    return scanResult;
+  }
 
   @override
   Future<void> writeKnownHostKeys(String host, List<String> keyLines) async {

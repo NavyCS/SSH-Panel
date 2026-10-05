@@ -135,10 +135,16 @@ class DomainsController extends ChangeNotifier {
   }
 
   /// Runs `ssh-keyscan` against [host] and records the key types found, or
-  /// `Unreachable` when it returns nothing.
+  /// `Unreachable` when it returns nothing. Reports the result in a toast.
   ///
   /// A second scan of the same host while one is in flight is ignored, so the
   /// row cannot end up with two results racing.
+  ///
+  /// The toast names every algorithm the host offered, not just how many. The
+  /// badge beside the row only has room for a count, and the tooltip that used
+  /// to carry the names needed the mouse to be over it -- so the answer to the
+  /// question the user actually asked by clicking Check was not on screen
+  /// unless they went looking for it.
   Future<void> checkHost(String host) async {
     if (_checkingHosts.contains(host)) return;
     _checkingHosts.add(host);
@@ -147,14 +153,22 @@ class DomainsController extends ChangeNotifier {
     try {
       final keys = await _configManager.scanHost(host);
       if (_disposed) return;
-      _hostStatus[host] =
-          keys.isEmpty ? 'Unreachable' : parseKeyTypes(keys).join(', ');
+      final keyTypes = parseKeyTypes(keys);
+      if (keyTypes.isEmpty) {
+        _hostStatus[host] = 'Unreachable';
+        ToastService.instance.showInfo(unreachableMessage, title: host);
+      } else {
+        _hostStatus[host] = keyTypes.join(', ');
+        ToastService.instance.showInfo(checkResultMessage(keyTypes), title: host);
+      }
     } on SshConfigException catch (e) {
       if (_disposed) return;
       _hostStatus[host] = 'Error: ${e.message}';
+      ToastService.instance.showErrorMessage(e.message);
     } catch (e) {
       if (_disposed) return;
       _hostStatus[host] = 'Error';
+      ToastService.instance.showErrorMessage('The scan failed unexpectedly.');
     } finally {
       _checkingHosts.remove(host);
       _notify();
@@ -276,7 +290,23 @@ class DomainsController extends ChangeNotifier {
   // Parsing helpers (pure, and therefore directly testable)
   // -----------------------------------------------------------------------
 
-  /// Extracts the distinct key algorithms from raw `ssh-keyscan` output.
+  /// Body of the toast shown after a successful check.
+///
+/// Every algorithm goes in, one per line. The badge next to the row can only
+/// fit a count, and a comma-joined run of names wraps into an unreadable block
+/// as soon as a host offers more than three keys -- which is the normal case.
+static String checkResultMessage(List<String> keyTypes) =>
+    '${keyTypes.length} ${keyTypes.length == 1 ? 'key type' : 'key types'}:\n'
+    '${keyTypes.map((type) => '  $type').join('\n')}';
+
+/// Body of the toast shown when a check finds nothing at all.
+///
+/// Says what did happen rather than only what did not: the scan ran and the
+/// host stayed silent, which is a different problem from a scan that failed.
+static const String unreachableMessage =
+    'No response. Check the hostname and that port 22 is reachable.';
+
+/// Extracts the distinct key algorithms from raw `ssh-keyscan` output.
   ///
   /// Each line is `host keytype base64...`, so the algorithm is field 1.
   static List<String> parseKeyTypes(List<String> keyLines) {

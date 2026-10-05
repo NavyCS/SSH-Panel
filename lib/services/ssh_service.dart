@@ -16,6 +16,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:win32/win32.dart';
 
+import 'cancellation.dart';
 import 'settings_service.dart';
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,13 @@ import 'settings_service.dart';
 
 /// The canonical Windows service name for the OpenSSH agent.
 const String _kServiceName = 'ssh-agent';
+
+/// `SERVICE_QUERY_CONFIG` access mask.
+///
+/// Not exported by `package:win32`, so it is declared here with the value
+/// documented in the Windows SDK (`winsvc.h`). Reading a service's
+/// configuration only, which requires no elevation.
+const int _serviceQueryConfig = 0x0001;
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -129,7 +137,11 @@ class SshServiceException implements Exception {
     // without admin rights. Only start/stop/setStartupType need elevation.
     const int scmAccess = 0x0001; // SC_MANAGER_CONNECT
     final result = OpenSCManager(null, null, scmAccess);
-  if (result.error.isError) {
+  // These two return Win32Result<SC_HANDLE>, so there is no BOOL to check --
+  // success is "a non-null handle". Checking result.error.isError instead
+  // would consult a GetLastError() that win32 read unconditionally and which
+  // can therefore be stale even on success.
+  if (result.value == nullptr) {
     final code = result.error.code;
     final hint = _scmFailureHint(code);
     final detail = hint.isEmpty
@@ -168,7 +180,7 @@ SC_HANDLE _openService(SC_HANDLE scm, int access) {
   return using((arena) {
     final svcName = arena.pcwstr(_kServiceName);
     final result = OpenService(scm, svcName, access);
-    if (result.error.isError) {
+    if (result.value == nullptr) {
       final code = result.error.code;
       if (code == 5) {
         throw SshServiceException(
@@ -203,7 +215,9 @@ SshServiceState _queryServiceState(SC_HANDLE svc) {
       bytesNeeded,
     );
 
-    if (result.error.isError) {
+    // Check the BOOL return value, not result.error.isError: win32 reads
+    // GetLastError() unconditionally, so a success can carry a stale code.
+    if (!result.value) {
       throw SshServiceException(
         SshServiceErrorCode.operationFailed,
         'QueryServiceStatusEx failed.',
@@ -234,6 +248,77 @@ int _controlService(SC_HANDLE svc, int controlCode) {
 int _startServiceRaw(SC_HANDLE svc) {
   final result = StartService(svc, 0, nullptr);
   return result.error.code;
+}
+
+/// Queries the configured startup type (`dwStartType`) of the service.
+///
+/// Uses the two-call `QueryServiceConfig` pattern: the first call passes a null
+/// buffer purely to learn how many bytes are needed, the second call fills in a
+/// correctly sized buffer.
+///
+/// Requires only `SERVICE_QUERY_CONFIG`, so no elevation is needed.
+StartupType _queryStartupTypeRaw(SC_HANDLE svc) {
+  return using((arena) {
+    final bytesNeeded = arena.allocate<Uint32>(sizeOf<Uint32>());
+
+    // First call: ask for the required size, ignoring the (expected) failure.
+    QueryServiceConfig(svc, null, 0, bytesNeeded);
+
+    final bufferSize = bytesNeeded.value;
+    if (bufferSize < sizeOf<Uint32>() * 3) {
+      // Too small to even hold the three leading DWORDs -- treat as unknown
+      // rather than reading garbage out of the struct.
+      throw SshServiceException(
+        SshServiceErrorCode.operationFailed,
+        'QueryServiceConfig returned an implausible buffer size.',
+        rawDetail: 'cbBufSize=$bufferSize',
+      );
+    }
+
+    final buffer = arena<Uint8>(bufferSize);
+    final result = QueryServiceConfig(
+      svc,
+      buffer.cast<QUERY_SERVICE_CONFIG>(),
+      bufferSize,
+      bytesNeeded,
+    );
+
+    // Trust the BOOL return value, NOT result.error.isError.
+    //
+    // win32 reads GetLastError() unconditionally after every call, so a
+    // *successful* QueryServiceConfig can still carry a stale non-zero code.
+    // Verified on this machine: the size-probe call fails with
+    // ERROR_INSUFFICIENT_BUFFER (122), and the successful call that follows
+    // still reports GetLastError() == 6 (ERROR_INVALID_HANDLE). Checking
+    // error.isError here threw a bogus failure for a call that had worked.
+    if (!result.value) {
+      final code = result.error.code;
+      throw SshServiceException(
+        code == 5
+            ? SshServiceErrorCode.accessDenied
+            : SshServiceErrorCode.operationFailed,
+        'QueryServiceConfig failed.',
+        rawDetail: 'error $code',
+      );
+    }
+
+    final startType = buffer.cast<QUERY_SERVICE_CONFIG>().ref.dwStartType;
+
+    // SERVICE_BOOT_START / SERVICE_SYSTEM_START are legacy boot-time types. A
+    // user-mode OpenSSH agent is never configured with those, but map them to
+    // automatic rather than failing, since that is what they effectively mean.
+    return switch (startType) {
+      SERVICE_AUTO_START || SERVICE_BOOT_START || SERVICE_SYSTEM_START =>
+        StartupType.automatic,
+      SERVICE_DEMAND_START => StartupType.manual,
+      SERVICE_DISABLED => StartupType.disabled,
+      _ => throw SshServiceException(
+          SshServiceErrorCode.operationFailed,
+          'Unrecognised startup type reported by the SCM.',
+          rawDetail: 'dwStartType=$startType',
+        ),
+    };
+  });
 }
 
 
@@ -273,6 +358,49 @@ class SshServiceManager {
       svc.close();
     } finally {
       scm.close();
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // queryStartupType
+  // -----------------------------------------------------------------------
+
+  /// Reads the startup type the service is *actually* configured with.
+  ///
+  /// Requires no elevation (`SERVICE_QUERY_CONFIG`), so this is safe to call on
+  /// every refresh. Returns `null` when the state cannot be determined -- for
+  /// example when OpenSSH is not installed -- so the UI can show "Unknown"
+  /// rather than silently displaying a hardcoded value.
+  Future<StartupType?> queryStartupType() async {
+    if (!await _isPresenceCheckOptional()) return null;
+
+    try {
+      final scm = _openScm();
+      try {
+        final svc = _openService(scm, _serviceQueryConfig);
+        try {
+          return _queryStartupTypeRaw(svc);
+        } finally {
+          svc.close();
+        }
+      } finally {
+        scm.close();
+      }
+    } on SshServiceException {
+      // A non-elevated app can normally read this, but if the SCM refuses we
+      // report "unknown" instead of failing the whole refresh.
+      return null;
+    }
+  }
+
+  /// Runs the OpenSSH presence check without throwing. Returns false when
+  /// OpenSSH is absent, in which case service queries are meaningless.
+  Future<bool> _isPresenceCheckOptional() async {
+    try {
+      await _assertPresence();
+      return true;
+    } on SshServiceException {
+      return false;
     }
   }
 
@@ -327,8 +455,15 @@ class SshServiceManager {
   /// to become reachable (verified via `ssh-add -l`).
   ///
   /// Returns `true` only when the pipe is actually usable.
-  Future<bool> start() async {
+  ///
+  /// Pass a [CancellationToken] to abort the polling phases when the caller is
+  /// torn down (tab switch, dispose). The token is only observed between
+  /// iterations, so cancellation is not instantaneous.
+  Future<bool> start({CancellationToken? cancellationToken}) async {
     await _assertPresence();
+    if (cancellationToken?.isCancelled ?? false) {
+      throw const CancellationTokenCancelled('Starting the ssh-agent service');
+    }
 
     // On access denied, re-launch elevated and exit immediately.
     try {
@@ -358,6 +493,9 @@ class SshServiceManager {
     // Phase 2: Poll until SERVICE_RUNNING or timeout (async loop, sync FFI).
     final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (DateTime.now().isBefore(deadline)) {
+      if (cancellationToken?.isCancelled ?? false) {
+        throw const CancellationTokenCancelled('Starting the ssh-agent service');
+      }
       final scm = _openScm();
       SshServiceState state;
       try {
@@ -409,13 +547,13 @@ class SshServiceManager {
     }
 
     // Service reports RUNNING — now verify the named-pipe is reachable.
-    return await _waitForAgentPipe();
+    return await _waitForAgentPipe(cancellationToken: cancellationToken);
     } on SshServiceException catch (e) {
       if (e.code != SshServiceErrorCode.accessDenied) rethrow;
       final mode = await SettingsService.getElevationMode();
       if (mode == SettingsService.modePerAction) {
         await _runElevatedSc('start $_kServiceName');
-        return await _waitForAgentPipe();
+        return await _waitForAgentPipe(cancellationToken: cancellationToken);
       }
       rethrow;
     }
@@ -423,11 +561,14 @@ class SshServiceManager {
 
   /// Polls `ssh-add -l` with exponential back-off until the agent pipe is
   /// reachable or retries are exhausted.
-  Future<bool> _waitForAgentPipe() async {
+  Future<bool> _waitForAgentPipe({CancellationToken? cancellationToken}) async {
     const maxRetries = 10;
     var delay = Duration(milliseconds: 200);
 
     for (var attempt = 0; attempt < maxRetries; attempt++) {
+      if (cancellationToken?.isCancelled ?? false) {
+        throw const CancellationTokenCancelled('Waiting for the agent pipe');
+      }
       final result = await Process.run('ssh-add', ['-l']);
       // exit 0 = keys loaded, exit 1 = no keys (but pipe alive),
       // exit 2 = agent not running.
@@ -453,8 +594,13 @@ class SshServiceManager {
   // -----------------------------------------------------------------------
 
   /// Stops the `ssh-agent` service and polls until it reports STOPPED.
-  Future<void> stop() async {
+  ///
+  /// See [start] for the meaning of [cancellationToken].
+  Future<void> stop({CancellationToken? cancellationToken}) async {
     await _assertPresence();
+    if (cancellationToken?.isCancelled ?? false) {
+      throw const CancellationTokenCancelled('Stopping the ssh-agent service');
+    }
 
     // On access denied, re-launch elevated and exit immediately.
     try {
@@ -484,6 +630,9 @@ class SshServiceManager {
     // Phase 2: Poll until SERVICE_STOPPED or timeout (async loop, sync FFI).
     final deadline = DateTime.now().add(const Duration(seconds: 30));
     while (DateTime.now().isBefore(deadline)) {
+      if (cancellationToken?.isCancelled ?? false) {
+        throw const CancellationTokenCancelled('Stopping the ssh-agent service');
+      }
       final scm = _openScm();
       SshServiceState state;
       try {

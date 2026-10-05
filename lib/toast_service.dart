@@ -34,26 +34,37 @@ class ToastService {
 
   // -- Error ---------------------------------------------------------------
 
+  /// How long an error toast stays on screen.
+  ///
+  /// The shadcn default is around 5 s, which is fine for "Config saved." but
+  /// far too short for a three-line error explanation: the message finishes
+  /// scrolling as the user starts to read it, and by the time they look for the
+  /// Copy button it is gone. Errors are the one case where being unreadable
+  /// costs the user real information, so they get a longer life.
+  static const Duration _errorToastDuration = Duration(seconds: 15);
+
   /// Shows a destructive toast for any thrown [error].
   ///
   /// Typed exceptions ([SshServiceException], [SshKeyException],
   /// [SshConfigException]) and [TimeoutException] are mapped to a title and
   /// description; unknown exceptions fall back to their [Object.toString].
   ///
-  /// The action button copies the full description to the clipboard instead of
-  /// dismissing the toast — useful for sharing error details with support.
+  /// The action button copies the description to the clipboard. It deliberately
+  /// does not replace the toast with a confirmation: doing so destroyed the
+  /// error message at the exact moment the user asked to keep it.
   void showError(Exception error) {
     final (title, description) = _mapError(error);
     _show(
       ShadToast.destructive(
         title: Text(title),
         description: Text(description),
+        duration: _errorToastDuration,
         action: Semantics(
           button: true,
           label: 'Copy error to clipboard',
           child: ShadButton.destructive(
             child: const Text('Copy'),
-            onPressed: () => _copyToClipboard(description),
+            onPressed: () => _copyToClipboard(description, showConfirmation: false),
           ),
         ),
       ),
@@ -71,12 +82,13 @@ class ToastService {
       ShadToast.destructive(
         title: const Text('Error'),
         description: Text(message),
+        duration: _errorToastDuration,
         action: Semantics(
           button: true,
           label: 'Copy error to clipboard',
           child: ShadButton.destructive(
             child: const Text('Copy'),
-            onPressed: () => _copyToClipboard(message),
+            onPressed: () => _copyToClipboard(message, showConfirmation: false),
           ),
         ),
       ),
@@ -129,10 +141,17 @@ class ToastService {
     });
   }
 
-  /// Copies [text] to the system clipboard and shows a brief confirmation.
-  void _copyToClipboard(String text) {
+  /// Copies [text] to the system clipboard.
+  ///
+  /// [showConfirmation] controls whether a "Copied to clipboard" toast is
+  /// raised. Callers copying from an error toast pass `false`, because
+  /// `ShadToasterState.show` replaces the visible toast: the confirmation would
+  /// displace the very error the user asked to preserve.
+  void _copyToClipboard(String text, {bool showConfirmation = true}) {
     Clipboard.setData(ClipboardData(text: text));
-    showInfo('Copied to clipboard');
+    if (showConfirmation) {
+      showInfo('Copied to clipboard');
+    }
   }
 
   (String title, String description) _mapError(Exception error) {
@@ -140,10 +159,10 @@ class ToastService {
       return (_serviceTitle(error), _serviceDescription(error));
     }
     if (error is SshKeyException) {
-      return (_keyTitle(error), error.toString());
+      return (_keyTitle(error), error.message);
     }
     if (error is SshConfigException) {
-      return (_configTitle(error), error.toString());
+      return (_configTitle(error), error.message);
     }
     if (error is TimeoutException) {
       return ('Timed out', error.message ?? 'The operation timed out.');
@@ -158,14 +177,16 @@ class ToastService {
     _ => 'Service error',
   };
 
+  // Every branch returns e.message, never e.toString(): toString() embeds
+  // rawDetail, which carries raw Win32 error codes, stderr and absolute paths.
+  // That string used to be rendered in the toast and pushed to the clipboard by
+  // the "Copy" action, leaking internals and file paths to the UI.
   String _serviceDescription(SshServiceException e) => switch (e.code) {
     SshServiceErrorCode.accessDenied =>
       'Administrator privileges are required for this action. '
       'In "Once" mode, use the "Admin Mode" button in the top bar. '
       'In "Per action" mode, accept the UAC prompt.',
-    SshServiceErrorCode.serviceNotFound => e.message,
-    SshServiceErrorCode.opensshNotInstalled => e.message,
-    _ => e.toString(),
+    _ => e.message,
   };
 
   String _keyTitle(SshKeyException e) => switch (e.code) {

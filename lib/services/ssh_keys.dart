@@ -188,6 +188,10 @@ class SshKeyManager {
   /// Returns an empty string if `USERPROFILE` is not set.
   String get sshDirectory => _sshDir;
 
+  /// Distinguishes staging files when a key is generated concurrently in two
+  /// tabs of this process.
+  static int _stagingCounter = 0;
+
   /// Resolves `~/.ssh` using `USERPROFILE`.
   String get _sshDir {
     final userProfile = Platform.environment['USERPROFILE'];
@@ -205,7 +209,12 @@ class SshKeyManager {
     List<String> arguments, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    late Process process;
+    // Nullable on purpose: when [Process.start] itself fails (for example the
+    // binary is not on PATH) no Process is ever assigned. Declaring this `late`
+    // and then calling kill() in the catch below threw a LateInitializationError
+    // that masked the real OSError, making the errorCode == 2 branch below dead
+    // code and hiding the "OpenSSH is not installed" message from the user.
+    Process? process;
     try {
       process = await Process.start(executable, arguments, runInShell: false);
 
@@ -214,7 +223,7 @@ class SshKeyManager {
       final exitCodeFuture = process.exitCode.timeout(
         timeout,
         onTimeout: () {
-          process.kill();
+          process?.kill();
           throw TimeoutException('$executable timed out');
         },
       );
@@ -230,12 +239,18 @@ class SshKeyManager {
         stderr: results[1] as List<int>,
       );
     } on TimeoutException catch (_) {
+      // The onTimeout callback above already killed the process. The stdout and
+      // stderr subscriptions are abandoned rather than awaited: Future.wait with
+      // eagerError completes on the first error, so both futures are left
+      // pending here. Their StreamSubscriptions are cancelled when the process
+      // handle is closed, which kill() triggers.
       throw SshKeyException(
         SshKeyErrorCode.timeout,
         '$executable timed out after ${timeout.inSeconds}s.',
       );
     } catch (e) {
-      process.kill();
+      // Guard: process is null when Process.start() failed to launch at all.
+      process?.kill();
       if (e is SshKeyException) rethrow;
       if (e is OSError) {
         if (e.errorCode == 2) {
@@ -655,13 +670,27 @@ class SshKeyManager {
     final keyPath = '$dir${Platform.pathSeparator}$effectiveName';
     final pubPath = '$keyPath.pub';
 
-    // Check for existing file *before* invoking ssh-keygen.
+    // Fail fast when the target already exists, so the common case gives an
+    // immediate, specific "file exists" error instead of running ssh-keygen
+    // only to have it refuse. This is a convenience check, NOT the safety
+    // mechanism: the authoritative guarantee is the atomic rename below.
     if (await File(keyPath).exists()) {
       throw SshKeyException(
         SshKeyErrorCode.fileExists,
         'The key file already exists: $keyPath',
       );
     }
+
+    // Generate into a unique staging name in the same directory, then rename
+    // into place. ssh-keygen refuses to overwrite, but a check-then-create
+    // sequence leaves a window in which another process could create the target
+    // (including as a symlink pointing elsewhere) between the exists() above
+    // and ssh-keygen writing to it. Staging in the same directory keeps the
+    // rename on the same volume, so it is atomic: either the key appears at
+    // the final path or it does not exist at all.
+    final stagingStem = '$keyPath.sshpanel-tmp-${_stagingCounter++}';
+    final stagingKey = stagingStem;
+    final stagingPub = '$stagingStem.pub';
 
     // Build the argument list.
     // NEVER use -N (broken on Windows).  Use -P instead.
@@ -670,7 +699,7 @@ class SshKeyManager {
       '-t',
       algorithm.type,
       '-f',
-      keyPath,
+      stagingKey,
       // -P "" means no passphrase (different from -N "" which is broken).
       '-P',
       passphrase ?? '',
@@ -702,17 +731,55 @@ class SshKeyManager {
     });
 
     if (result.exitCode != 0) {
-      // Clean up partial files if keygen partially wrote.
-      final privFile = File(keyPath);
-      final pubFile = File(pubPath);
-      if (await privFile.exists()) await privFile.delete();
-      if (await pubFile.exists()) await pubFile.delete();
+      // Clean up the staging files ssh-keygen may have partially written.
+      await _deleteIfExists(stagingKey);
+      await _deleteIfExists(stagingPub);
+
+      // ssh-keygen can also fail because the *final* path appeared while we
+      // were generating. Surface that as the specific "file exists" case
+      // rather than a generic generation failure.
+      if (await File(keyPath).exists()) {
+        throw SshKeyException(
+          SshKeyErrorCode.fileExists,
+          'The key file already exists: $keyPath',
+        );
+      }
 
       throw SshKeyException(
         SshKeyErrorCode.keygenFailed,
         'ssh-keygen failed (exit code ${result.exitCode}).',
         rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
       );
+    }
+
+    // Publish the staged keys at their final names.
+    try {
+      await File(stagingKey).rename(keyPath);
+      await File(stagingPub).rename(pubPath);
+    } catch (e) {
+      // Do not leave half-published state behind.
+      await _deleteIfExists(stagingKey);
+      await _deleteIfExists(stagingPub);
+      await _deleteIfExists(keyPath);
+      await _deleteIfExists(pubPath);
+      throw SshKeyException(
+        SshKeyErrorCode.keygenFailed,
+        'The key was generated but could not be moved into place.',
+        rawDetail: e.toString(),
+      );
+    }
+  }
+
+  /// Deletes [path] if it exists, ignoring the result.
+  ///
+  /// Best-effort cleanup: a failure here (antivirus holding a handle, a
+  /// permission change) must not mask the original error being reported.
+  static Future<void> _deleteIfExists(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Intentionally ignored -- see doc comment.
     }
   }
 

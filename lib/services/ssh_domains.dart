@@ -7,6 +7,7 @@
 /// **No SSH connection logic** — this module only manages the text files.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 // ---------------------------------------------------------------------------
@@ -220,17 +221,38 @@ class SshConfigManager {
     return true;
   }
 
+  /// How long `ssh-keyscan` may run before it is killed.
+  ///
+  /// `Process.run` has no timeout of its own, so without this a host that
+  /// accepts the TCP connection and then goes silent (a tarpit, a firewall
+  /// that drops rather than rejects) would keep the isolate awaiting
+  /// indefinitely — the tab's "Checking..." state would never resolve.
+  static const Duration _keyscanTimeout = Duration(seconds: 15);
+
   /// Runs `ssh-keyscan` against [host] and returns the raw key lines.
   ///
   /// Returns an empty list if the host is unreachable — **never throws**
   /// for a resolution failure.  Throws [SshConfigException] only if
-  /// `ssh-keyscan` itself is missing.
+  /// `ssh-keyscan` itself is missing, or if the scan exceeds
+  /// [_keyscanTimeout].
   Future<List<String>> scanHost(String host) async {
-    final result = await Process.run(
-      'ssh-keyscan',
-      [host],
-      runInShell: false,
-    );
+    final ProcessResult result;
+    try {
+      result = await Process.run(
+        'ssh-keyscan',
+        [host],
+        runInShell: false,
+      ).timeout(_keyscanTimeout);
+    } on TimeoutException {
+      // Same user-visible outcome as an unreachable host: no keys were
+      // returned. Distinguishable in rawDetail for anyone debugging.
+      throw SshConfigException(
+        SshConfigErrorCode.keyscanFailed,
+        'ssh-keyscan did not respond for $host within '
+        '${_keyscanTimeout.inSeconds} seconds.',
+        rawDetail: 'ssh-keyscan timed out after ${_keyscanTimeout.inSeconds}s',
+      );
+    }
 
     if (result.exitCode != 0) {
       final stderr = result.stderr.toString().trim();

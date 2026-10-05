@@ -6,6 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'services/cancellation.dart';
+import 'shared/dialogs/passphrase_dialog.dart';
+import 'shared/widgets/action_row.dart';
+import 'shared/widgets/host_status_badge.dart';
+import 'shared/widgets/disabled_action_wrapper.dart';
 import 'services/settings_service.dart';
 import 'services/ssh_service.dart';
 import 'services/ssh_keys.dart';
@@ -108,6 +113,16 @@ class _SshPanelShellState extends State<SshPanelShell> {
         builder: (context, setStateDialog) => ShadDialog(
           title: const Text('Settings'),
           description: const Text('Choose your elevation mode.'),
+          actions: [
+            Semantics(
+              button: true,
+              label: 'Close',
+              child: ShadButton.ghost(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Close'),
+              ),
+            ),
+          ],
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -142,16 +157,6 @@ class _SshPanelShellState extends State<SshPanelShell> {
               ),
             ],
           ),
-          actions: [
-            Semantics(
-              button: true,
-              label: 'Close',
-              child: ShadButton.ghost(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Close'),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -264,21 +269,21 @@ class _SshPanelShellState extends State<SshPanelShell> {
               tabs: [
                 ShadTab(
                   value: 'service',
-                  child: const Text('Service'),
                   content: const ServiceTab(),
                   expandContent: true,
+                  child: const Text('Service'),
                 ),
                 ShadTab(
                   value: 'keys',
-                  child: const Text('Keys'),
                   content: const KeysTab(),
                   expandContent: true,
+                  child: const Text('Keys'),
                 ),
                 ShadTab(
                   value: 'domains',
-                  child: const Text('Domains'),
                   content: const DomainsTab(),
                   expandContent: true,
+                  child: const Text('Domains'),
                 ),
               ],
             ),
@@ -300,10 +305,25 @@ class ServiceTab extends StatefulWidget {
 
 class _ServiceTabState extends State<ServiceTab> {
   final _serviceManager = SshServiceManager();
+
+  /// Cancels the in-flight start/stop polling when the tab goes away.
+  ///
+  /// Without this, the SCM polling loop keeps running for up to 30 s after
+  /// the user switches tabs, waking the isolate every 300 ms for a result
+  /// nobody is waiting for.
+  final _cancellation = CancellationToken();
+
   SshServiceState? _status;
+
+  /// The startup type as reported by the SCM. `null` means it could not be
+  /// determined (OpenSSH absent, or the SCM refused the query).
+  ///
+  /// This used to be initialised to `StartupType.manual`, which meant the
+  /// dropdown claimed "Manual" even when the service was set to Automatic.
+  StartupType? _startupType;
+
   bool _loading = false;
   bool _startupLoading = false;
-  StartupType _startupType = StartupType.manual;
 
   @override
   void initState() {
@@ -318,20 +338,24 @@ class _ServiceTabState extends State<ServiceTab> {
 
   @override
   void dispose() {
+    _cancellation.cancel();
     SettingsService.elevationModeNotifier.removeListener(_onModeChanged);
     super.dispose();
   }
 
   Future<void> _refreshStatus() async {
-    setState(() {
-      _loading = true;
-    });
+    // Guard before setState, not after: a widget can be disposed while the
+    // await below is in flight, and calling setState on it throws.
+    if (!mounted) return;
+    setState(() => _loading = true);
     try {
       final status = await _serviceManager.checkStatus();
       agentServiceState.value = status;
+      final startupType = await _serviceManager.queryStartupType();
       if (!mounted) return;
       setState(() {
         _status = status;
+        _startupType = startupType;
         _loading = false;
       });
     } on SshServiceException catch (e) {
@@ -340,57 +364,77 @@ class _ServiceTabState extends State<ServiceTab> {
       setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      ToastService.instance.showError(e is SshServiceException
-          ? e
-          : SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      ToastService.instance.showError(SshServiceException(
+        SshServiceErrorCode.operationFailed,
+        e.toString(),
+      ));
       setState(() => _loading = false);
     }
   }
 
   Future<void> _performServiceAction(Future<void> Function() action) async {
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
       await action();
       if (!mounted) return;
-      final status = await _serviceManager.checkStatus();
-      agentServiceState.value = status;
       await _refreshStatus();
-      if (mounted) {
-        ToastService.instance.showSuccess('Service action completed.');
-      }
+      if (!mounted) return;
+      ToastService.instance.showSuccess('Service action completed.');
+    } on CancellationTokenCancelled {
+      // The tab was disposed mid-poll. Not an error the user caused or needs
+      // to see; leave the UI alone.
     } on SshServiceException catch (e) {
       if (!mounted) return;
       ToastService.instance.showError(e);
       setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
-      ToastService.instance.showError(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
+      ToastService.instance.showError(SshServiceException(
+        SshServiceErrorCode.operationFailed,
+        e.toString(),
+      ));
       setState(() => _loading = false);
     }
   }
 
-  Future<void> _startService() => _performServiceAction(() => _serviceManager.start());
+  Future<void> _startService() => _performServiceAction(
+        () => _serviceManager.start(cancellationToken: _cancellation),
+      );
 
-  Future<void> _stopService() => _performServiceAction(() => _serviceManager.stop());
+  Future<void> _stopService() => _performServiceAction(
+        () => _serviceManager.stop(cancellationToken: _cancellation),
+      );
 
   Future<void> _setStartupType(StartupType type) async {
     final originalType = _startupType;
-    setState(() { _startupType = type; _startupLoading = true; });
+    if (!mounted) return;
+    setState(() {
+      _startupType = type;
+      _startupLoading = true;
+    });
     try {
       await _serviceManager.setStartupType(type);
       if (!mounted) return;
       setState(() => _startupLoading = false);
-      if (mounted) {
-        ToastService.instance.showSuccess('Startup type set.');
-      }
+      ToastService.instance.showSuccess('Startup type set.');
     } on SshServiceException catch (e) {
       if (!mounted) return;
       ToastService.instance.showError(e);
-      setState(() { _startupType = originalType; _startupLoading = false; });
+      setState(() {
+        _startupType = originalType;
+        _startupLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      ToastService.instance.showError(SshServiceException(SshServiceErrorCode.operationFailed, e.toString()));
-      setState(() { _startupType = originalType; _startupLoading = false; });
+      ToastService.instance.showError(SshServiceException(
+        SshServiceErrorCode.operationFailed,
+        e.toString(),
+      ));
+      setState(() {
+        _startupType = originalType;
+        _startupLoading = false;
+      });
     }
   }
 
@@ -534,6 +578,9 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
           // ---- Startup type card ----
           LayoutBuilder(
             builder: (context, constraints) {
+              // `initialValue` is null when the SCM could not be queried, so the
+              // select renders empty instead of asserting a value we did not
+              // read. The helper text below explains that state.
               Widget selectWidget = ShadSelect<StartupType>(
                 initialValue: _startupType,
                 enabled: !_startupLoading && adminEnabled,
@@ -593,7 +640,22 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
                 ),
                 child: Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: selectWidget,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      selectWidget,
+                      if (_startupType == null && !_startupLoading)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            'Unknown — the current startup type could not be read from the Service Control Manager.',
+                            style: theme.textTheme.small.copyWith(
+                              color: theme.colorScheme.mutedForeground,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -605,43 +667,9 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
 }
 
 // Reusable Action Wrapper for Disabled States
-
-/// A reusable wrapper that ensures disabled buttons properly look and behave
-/// as disabled: applies opacity, blocks internal pointer hover effects,
-/// and adjusts the mouse cursor, while keeping the tooltip active and informative.
-class DisabledActionWrapper extends StatelessWidget {
-  const DisabledActionWrapper({
-    super.key,
-    required this.enabled,
-    required this.tooltip,
-    required this.child,
-    this.disabledOpacity = 0.35,
-    this.disabledCursor = SystemMouseCursors.basic,
-  });
-
-  final bool enabled;
-  final String tooltip;
-  final Widget child;
-  final double disabledOpacity;
-  final MouseCursor disabledCursor;
-
-  @override
-  Widget build(BuildContext context) {
-    return ShadTooltip(
-      builder: (context) => Text(tooltip),
-      child: MouseRegion(
-        cursor: enabled ? SystemMouseCursors.click : disabledCursor,
-        child: Opacity(
-          opacity: enabled ? 1.0 : disabledOpacity,
-          child: IgnorePointer(
-            ignoring: !enabled,
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
-}
+//
+// Moved to lib/shared/widgets/disabled_action_wrapper.dart, where it now lives
+// alongside ActionRow and the corrected contrast/semantics behaviour.
 
 class _KeyGenerationParams {
   const _KeyGenerationParams({
@@ -656,8 +684,6 @@ class _KeyGenerationParams {
   final String? comment;
   final bool passphraseProtected;
 }
-
-// Keys tab
 
 class KeysTab extends StatefulWidget {
   const KeysTab({super.key});
@@ -677,6 +703,10 @@ class _KeysTabState extends State<KeysTab> {
   Map<String, String> _keyComments = {};
   bool _loading = false;
   bool _agentRunning = false;
+
+  /// Incremented by every [_refresh]. Used to discard the results of a
+  /// superseded run so a slow earlier call cannot overwrite a newer one.
+  int _refreshGeneration = 0;
 
   @override
   void initState() {
@@ -698,6 +728,13 @@ class _KeysTabState extends State<KeysTab> {
   }
 
   Future<void> _refresh() async {
+    if (!mounted) return;
+    // Generation guard. _refresh runs six sequential awaits, so two clicks on
+    // Refresh (or a click while a previous refresh is still in flight) used to
+    // start two overlapping runs that raced to assign _keyFiles/_loadedKeys.
+    // Whichever finished last won, which could be the *older* run. Each call
+    // now claims a generation; only the newest one may commit.
+    final generation = ++_refreshGeneration;
     setState(() {
       _loading = true;
     });
@@ -738,6 +775,9 @@ class _KeysTabState extends State<KeysTab> {
       }
 
       if (!mounted) return;
+      // A newer refresh has started while this one was awaiting; drop these
+      // results so they cannot overwrite fresher state.
+      if (generation != _refreshGeneration) return;
       setState(() {
         _keyFiles = keyFiles;
         _loadedKeys = loadedKeys;
@@ -749,16 +789,16 @@ class _KeysTabState extends State<KeysTab> {
         _loading = false;
       });
     } on TimeoutException catch (_) {
-      if (!mounted) return;
+      if (!mounted || generation != _refreshGeneration) return;
       ToastService.instance.showError(
           TimeoutException('Refresh timed out — the ssh-agent may be unresponsive.'));
       setState(() => _loading = false);
     } on SshKeyException catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _refreshGeneration) return;
       ToastService.instance.showError(e);
       setState(() => _loading = false);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _refreshGeneration) return;
       ToastService.instance.showError(e is Exception
           ? e
           : Exception(e.toString()));
@@ -810,66 +850,19 @@ class _KeysTabState extends State<KeysTab> {
   }
 
   /// Shows a dialog requesting the passphrase for a protected key.
-  Future<String?> _promptPassphrase() async {
-    final controller = TextEditingController();
-    bool obscure = true;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setStateDialog) => ShadDialog(
-          title: const Text('Passphrase required'),
-          description: const Text(
-            'This key is protected by a passphrase.',
-            style: TextStyle(fontSize: 14),
-          ),
-          child: ShadInput(
-            controller: controller,
-            obscureText: obscure,
-            placeholder: const Text('Enter passphrase'),
-            onSubmitted: (_) => Navigator.of(ctx).pop(true),
-            trailing: SizedBox.square(
-              dimension: 24,
-              child: OverflowBox(
-                maxWidth: 28,
-                maxHeight: 28,
-                child: Semantics(
-                  button: true,
-                  label: obscure ? 'Show passphrase' : 'Hide passphrase',
-                  child: ShadIconButton(
-                    iconSize: 20,
-                    padding: EdgeInsets.all(2),
-                    icon: Icon(obscure ? LucideIcons.eyeOff : LucideIcons.eye),
-                    onPressed: () {
-                      setStateDialog(() => obscure = !obscure);
-                    },
-                  ),
-                ),
-              ),
-            ),
-          ),
-          actions: [
-            Semantics(
-              button: true,
-              label: 'Cancel passphrase prompt',
-              child: ShadButton.ghost(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancel'),
-              ),
-            ),
-            Semantics(
-              button: true,
-              label: 'Load key with passphrase',
-              child: ShadButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Load'),
-              ),
-            ),
-          ],
-        ),
-      ),
+  /// Asks for the passphrase of an *existing* key, in order to load it into the
+  /// agent.
+  ///
+  /// Delegates to [promptPassphrase]. The wording is specific to this case: the
+  /// key exists and is already encrypted, so the user is being asked to unlock
+  /// something rather than to choose a new secret.
+  Future<String?> _promptPassphrase() {
+    return promptPassphrase(
+      context,
+      title: 'Passphrase required',
+      description: 'This key is protected by a passphrase.',
+      confirmLabel: 'Load',
     );
-    if (confirmed != true) return null;
-    return controller.text;
   }
 
   Future<void> _removeKey(String path) async {
@@ -1080,7 +1073,20 @@ class _KeysTabState extends State<KeysTab> {
 
     String? passphrase;
     if (params.passphraseProtected) {
-      passphrase = await _promptPassphrase();
+      // The dialog above was awaited, so this State may be gone by now; a
+      // BuildContext is not valid across an async gap.
+      if (!mounted) return;
+      // Not _promptPassphrase(): that asks to *unlock* an existing key, and
+      // says so. Here the key does not exist yet, so the dialog states what
+      // the user is creating and what it will cost them.
+      passphrase = await promptPassphrase(
+        context,
+        title: 'Choose a passphrase',
+        description:
+            'The new key will be encrypted with this passphrase. Keep it — '
+            'there is no way to recover the key without it.',
+        confirmLabel: 'Create key',
+      );
       if (passphrase == null) return;
     }
 
@@ -1154,15 +1160,6 @@ class _KeysTabState extends State<KeysTab> {
           'Paste a public key line (e.g. ssh-ed25519 AAAAC3... user@host) to authorize incoming SSH connections.',
           style: TextStyle(fontSize: 14),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: ShadInput(
-            controller: keyController,
-            placeholder: const Text('ssh-ed25519 AAAAC3NzaC1... user@machine'),
-            maxLines: 3,
-            minLines: 2,
-          ),
-        ),
         actions: [
           Semantics(
             button: true,
@@ -1181,6 +1178,15 @@ class _KeysTabState extends State<KeysTab> {
             ),
           ),
         ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: ShadInput(
+            controller: keyController,
+            placeholder: const Text('ssh-ed25519 AAAAC3NzaC1... user@machine'),
+            maxLines: 3,
+            minLines: 2,
+          ),
+        ),
       ),
     );
 
@@ -1297,69 +1303,42 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               ],
             ),
           ),
-          DisabledActionWrapper(
-            enabled: !_loading && hasPub,
-            tooltip: hasPub
-                ? 'View public key of ${_shortPath(path)}'
-                : 'No .pub file for ${_shortPath(path)}',
-            child: Semantics(
-              button: true,
-              label: 'View public key ${_shortPath(path)}',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
-                onPressed: !_loading && hasPub ? () => _viewPublicKey(path) : null,
-                child: const Text('View'),
+          ActionRow(
+            // Gaps between View|Load|Unload|Delete were 0 and 4 in the original
+            // hand-written tree; a uniform 4 keeps the cluster legible without
+            // changing which actions are adjacent.
+            actions: [
+              RowAction(
+                label: 'View',
+                onPressed:
+                    !_loading && hasPub ? () => _viewPublicKey(path) : null,
+                enabledTooltip: 'View public key of ${_shortPath(path)}',
+                disabledTooltip: 'No .pub file for ${_shortPath(path)}',
               ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          DisabledActionWrapper(
-            enabled: canLoad,
-            tooltip: !_agentRunning
-                ? 'Start the ssh-agent service first'
-                : isLoaded
-                    ? 'Key is already loaded in agent'
-                    : 'Load ${_shortPath(path)} into ssh-agent',
-            child: Semantics(
-              button: true,
-              label: 'Load ${_shortPath(path)}',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
+              RowAction(
+                label: 'Load',
                 onPressed: canLoad ? () => _addKey(path) : null,
-                child: const Text('Load'),
+                enabledTooltip: 'Load ${_shortPath(path)} into ssh-agent',
+                disabledTooltip: !_agentRunning
+                    ? 'Start the ssh-agent service first'
+                    : 'Key is already loaded in agent',
               ),
-            ),
-          ),
-          DisabledActionWrapper(
-            enabled: canUnload,
-            tooltip: !_agentRunning
-                ? 'Start the ssh-agent service first'
-                : !isLoaded
-                    ? 'Key is not loaded in agent'
-                    : 'Unload ${_shortPath(path)} from ssh-agent',
-            child: Semantics(
-              button: true,
-              label: 'Unload ${_shortPath(path)}',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
+              RowAction(
+                label: 'Unload',
                 onPressed: canUnload ? () => _removeKey(path) : null,
-                child: const Text('Unload'),
+                enabledTooltip: 'Unload ${_shortPath(path)} from ssh-agent',
+                disabledTooltip: !_agentRunning
+                    ? 'Start the ssh-agent service first'
+                    : 'Key is not loaded in agent',
               ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          DisabledActionWrapper(
-            enabled: !_loading,
-            tooltip: 'Delete ${_shortPath(path)} and its .pub file',
-            child: Semantics(
-              button: true,
-              label: 'Delete ${_shortPath(path)}',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
+              RowAction(
+                label: 'Delete',
                 onPressed: !_loading ? () => _deleteKeyFile(path) : null,
-                child: const Text('Delete'),
+                enabledTooltip:
+                    'Delete ${_shortPath(path)} and its .pub file',
+                disabledTooltip: 'Wait for the current operation to finish',
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -1386,14 +1365,6 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           'authorized_keys on a remote host.',
           style: TextStyle(fontSize: 14),
         ),
-        child: SelectableText(
-          pubKey,
-          style: const TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 12,
-            height: 1.5,
-          ),
-        ),
         actions: [
           Semantics(
             button: true,
@@ -1415,6 +1386,14 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             ),
           ),
         ],
+        child: SelectableText(
+          pubKey,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
       ),
     );
   }
@@ -1582,7 +1561,16 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                     : Column(
                         children: [
                           for (final path in _keyFiles)
-                            _buildKeyFileRow(theme, path),
+                            // KeyedSubtree because _buildKeyFileRow is a
+                            // helper method, not a widget, so it cannot take a
+                            // key itself. Without a stable identity Flutter
+                            // falls back to the list index, so inserting or
+                            // removing a key rebuilds every following row and
+                            // loses scroll/selection.
+                            KeyedSubtree(
+                              key: ValueKey(path),
+                              child: _buildKeyFileRow(theme, path),
+                            ),
                           const SizedBox(height: 12),
                           ShadAlert(
                             icon: const Icon(LucideIcons.info, size: 16),
@@ -1647,22 +1635,28 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                         : Column(
                         children: [
                           for (final key in _loadedKeys)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  ShadBadge.secondary(
-                                    child: Text(key.type),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      key.fingerprint,
-                                      style: theme.textTheme.small,
-                                      overflow: TextOverflow.ellipsis,
+                            // Keyed by fingerprint: that is the identity the
+                            // agent assigns, and it survives a re-sort.
+                            KeyedSubtree(
+                              key: ValueKey(key.fingerprint),
+                              child: Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 4),
+                                child: Row(
+                                  children: [
+                                    ShadBadge.secondary(
+                                      child: Text(key.type),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        key.fingerprint,
+                                        style: theme.textTheme.small,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                         ],
@@ -1798,13 +1792,13 @@ class _DomainsTabState extends State<DomainsTab> {
   final _configManager = SshConfigManager();
   late TextEditingController _configController;
   late final TextEditingController _hostController;
-List<Map<String, String>> _knownHosts = [];
-    bool _loading = false;
-    bool _editing = false;
-    bool _hostsLoading = false;
-    final ValueNotifier<bool> _adding = ValueNotifier<bool>(false);
-    final Map<String, String?> _hostStatus = {};
-    final Set<String> _checkingHosts = {};
+  List<Map<String, String>> _knownHosts = [];
+  bool _loading = false;
+  bool _editing = false;
+  bool _hostsLoading = false;
+  final ValueNotifier<bool> _adding = ValueNotifier<bool>(false);
+  final Map<String, String?> _hostStatus = {};
+  final Set<String> _checkingHosts = {};
 
   @override
   void initState() {
@@ -1816,6 +1810,9 @@ List<Map<String, String>> _knownHosts = [];
 
   @override
   void dispose() {
+    // _adding was never disposed, so its listeners outlived the State on every
+    // tab switch.
+    _adding.dispose();
     _configController.dispose();
     _hostController.dispose();
     super.dispose();
@@ -2054,6 +2051,26 @@ void _openSshFolder() {
           description: const Text(
             'Select the key algorithms to add. All are selected by default.',
           ),
+          actions: [
+            Semantics(
+              button: true,
+              label: 'Cancel add keys',
+              child: ShadButton.outline(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
+              ),
+            ),
+            Semantics(
+              button: true,
+              label: 'Add selected keys',
+              child: ShadButton(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () => Navigator.of(context).pop(true),
+                child: const Text('Add'),
+              ),
+            ),
+          ],
           child: ListView(
             shrinkWrap: true,
             children: [
@@ -2081,26 +2098,6 @@ void _openSshFolder() {
                 ),
             ],
           ),
-          actions: [
-            Semantics(
-              button: true,
-              label: 'Cancel add keys',
-              child: ShadButton.outline(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-            ),
-            Semantics(
-              button: true,
-              label: 'Add selected keys',
-              child: ShadButton(
-                onPressed: selected.isEmpty
-                    ? null
-                    : () => Navigator.of(context).pop(true),
-                child: const Text('Add'),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -2180,67 +2177,46 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          ShadTooltip(
-            builder: (context) => Text(host),
-            child: Semantics(
-              button: true,
-              label: 'Check host $host',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
+          ActionRow(
+            actions: [
+              RowAction(
+                label: 'Check',
                 onPressed: _hostsLoading || _checkingHosts.contains(host)
                     ? null
                     : () => _checkHost(host),
-                child: _checkingHosts.contains(host)
-                    ? const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Check'),
+                enabledTooltip: 'Scan host keys for $host',
+                disabledTooltip: _checkingHosts.contains(host)
+                    ? 'Already checking $host'
+                    : 'Wait for the current operation to finish',
               ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          if (_hostStatus[host] != null)
-            ShadTooltip(
-              builder: (context) => Text(
-                _hostStatus[host] == 'Unreachable'
-                    ? 'Did not respond to ssh-keyscan.'
-                    : _hostStatus[host]!,
-              ),
-              child: Semantics(
-                button: true,
-                label: 'Host status for $host: ${_hostStatus[host]}',
-                child: ShadButton.ghost(
-                  size: ShadButtonSize.sm,
-                  onPressed: () {},
-                  child: ShadBadge(
-                    child: Text(
-                      _hostStatus[host] == 'Unreachable'
-                          ? 'Unreachable'
-                          : '${_hostStatus[host]!.split(', ').length} key(s) found',
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          const SizedBox(width: 6),
-          ShadTooltip(
-            builder: (context) => Text(host),
-            child: Semantics(
-              button: true,
-              label: 'Remove host $host',
-              child: ShadButton.ghost(
-                size: ShadButtonSize.sm,
+              RowAction(
+                label: 'Remove',
                 onPressed: _hostsLoading
                     ? null
                     : () => _removeKnownHost(host, keyType),
-                child: const Text('Remove'),
+                enabledTooltip: 'Remove $host from known_hosts',
+                disabledTooltip: 'Wait for the current operation to finish',
+              ),
+            ],
+          ),
+          const SizedBox(width: 6),
+          if (_hostStatus[host] != null)
+            // Not a button. It used to be wrapped in ShadButton.ghost with an
+            // empty onPressed, which put a dead control in the tab order and
+            // announced it as a button to screen readers. The status is read
+            // only; the tooltip below carries the detail instead.
+            ShadTooltip(
+              builder: (context) => Text(
+                _hostStatus[host] == 'Unreachable'
+                    ? 'No response from $host. Check the hostname and that'
+                        ' port 22 is reachable, then try again.'
+                    : _hostStatus[host]!,
+              ),
+              child: Semantics(
+                label: 'Host status for $host: ${_hostStatus[host]}',
+                child: HostStatusBadge(status: _hostStatus[host]!),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -2440,7 +2416,16 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                         : Column(
                             children: [
                               for (final entry in _knownHosts)
-                                _buildHostRow(entry, theme),
+                                // Composite key: known_hosts entries are
+                                // Map<String, String>, which has no identity
+                                // of its own, so host+keyType together stand
+                                // in for one.
+                                KeyedSubtree(
+                                  key: ValueKey(
+                                    '${entry['host']}|${entry['keyType']}',
+                                  ),
+                                  child: _buildHostRow(entry, theme),
+                                ),
                             ],
                           ),
           ],

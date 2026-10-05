@@ -33,13 +33,19 @@ dependencies:
 
   win32: ^6.4.0
   shadcn_ui: ^0.56.3
-  path_provider: ^2.1.0
   shared_preferences: ^2.5.5
   flutter_svg: ^2.3.0
+  # Imported directly by lib/services/*.dart (ffi/ffi.dart for the arena
+  # helpers), so it must be declared rather than relied on transitively
+  # through win32.
+  ffi: ^2.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Required by analysis_options.yaml. Without it the include below silently
+  # fails to resolve and `flutter analyze` reports zero lints.
+  flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
 
 flutter_launcher_icons:

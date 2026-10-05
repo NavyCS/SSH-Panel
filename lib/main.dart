@@ -6,23 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
-import 'services/cancellation.dart';
+import 'features/service/service_controller.dart';
+import 'services/agent_state.dart';
+import 'services/settings_service.dart';
+import 'services/ssh_domains.dart';
+import 'services/ssh_keys.dart';
+import 'services/ssh_service.dart';
 import 'shared/dialogs/passphrase_dialog.dart';
 import 'shared/widgets/action_row.dart';
-import 'shared/widgets/host_status_badge.dart';
 import 'shared/widgets/disabled_action_wrapper.dart';
-import 'services/settings_service.dart';
-import 'services/ssh_service.dart';
-import 'services/ssh_keys.dart';
-import 'services/ssh_domains.dart';
+import 'shared/widgets/host_status_badge.dart';
 import 'toast_service.dart';
 
-/// Shared notifier so the Service tab can signal the Keys tab that the
-/// ssh-agent state changed (started / stopped). The Keys tab listens to this
-/// and refreshes its view so Load/Unload and the Loaded Keys card stay in
-/// sync without switching tabs.
-final ValueNotifier<SshServiceState?> agentServiceState =
-    ValueNotifier<SshServiceState?>(null);
+/// Re-exported so the tabs keep importing it from the entrypoint while the
+/// definition lives in a module a controller can also reach.
+export 'services/agent_state.dart' show agentServiceState;
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -304,31 +302,18 @@ class ServiceTab extends StatefulWidget {
 }
 
 class _ServiceTabState extends State<ServiceTab> {
-  final _serviceManager = SshServiceManager();
-
-  /// Cancels the in-flight start/stop polling when the tab goes away.
+  /// The tab's state and async logic live in [ServiceController].
   ///
-  /// Without this, the SCM polling loop keeps running for up to 30 s after
-  /// the user switches tabs, waking the isolate every 300 ms for a result
-  /// nobody is waiting for.
-  final _cancellation = CancellationToken();
-
-  SshServiceState? _status;
-
-  /// The startup type as reported by the SCM. `null` means it could not be
-  /// determined (OpenSSH absent, or the SCM refused the query).
-  ///
-  /// This used to be initialised to `StartupType.manual`, which meant the
-  /// dropdown claimed "Manual" even when the service was set to Automatic.
-  StartupType? _startupType;
-
-  bool _loading = false;
-  bool _startupLoading = false;
+  /// It used to live here, which meant every method carried an
+  /// `if (!mounted) return;` after each `await` -- roughly half of this class
+  /// was bookkeeping about whether the widget was still alive. The controller
+  /// cancels its own polling token in `dispose()`, so nothing has to check.
+  final _controller = ServiceController();
 
   @override
   void initState() {
     super.initState();
-    _refreshStatus();
+    _controller.refresh();
     SettingsService.elevationModeNotifier.addListener(_onModeChanged);
   }
 
@@ -338,118 +323,26 @@ class _ServiceTabState extends State<ServiceTab> {
 
   @override
   void dispose() {
-    _cancellation.cancel();
     SettingsService.elevationModeNotifier.removeListener(_onModeChanged);
+    // Cancels the SCM polling loops and detaches every listener.
+    _controller.dispose();
     super.dispose();
   }
 
-  Future<void> _refreshStatus() async {
-    // Guard before setState, not after: a widget can be disposed while the
-    // await below is in flight, and calling setState on it throws.
-    if (!mounted) return;
-    setState(() => _loading = true);
-    try {
-      final status = await _serviceManager.checkStatus();
-      agentServiceState.value = status;
-      final startupType = await _serviceManager.queryStartupType();
-      if (!mounted) return;
-      setState(() {
-        _status = status;
-        _startupType = startupType;
-        _loading = false;
-      });
-    } on SshServiceException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(SshServiceException(
-        SshServiceErrorCode.operationFailed,
-        e.toString(),
-      ));
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _performServiceAction(Future<void> Function() action) async {
-    if (!mounted) return;
-    setState(() => _loading = true);
-    try {
-      await action();
-      if (!mounted) return;
-      await _refreshStatus();
-      if (!mounted) return;
-      ToastService.instance.showSuccess('Service action completed.');
-    } on CancellationTokenCancelled {
-      // The tab was disposed mid-poll. Not an error the user caused or needs
-      // to see; leave the UI alone.
-    } on SshServiceException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(SshServiceException(
-        SshServiceErrorCode.operationFailed,
-        e.toString(),
-      ));
-      setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _startService() => _performServiceAction(
-        () => _serviceManager.start(cancellationToken: _cancellation),
-      );
-
-  Future<void> _stopService() => _performServiceAction(
-        () => _serviceManager.stop(cancellationToken: _cancellation),
-      );
-
-  Future<void> _setStartupType(StartupType type) async {
-    final originalType = _startupType;
-    if (!mounted) return;
-    setState(() {
-      _startupType = type;
-      _startupLoading = true;
-    });
-    try {
-      await _serviceManager.setStartupType(type);
-      if (!mounted) return;
-      setState(() => _startupLoading = false);
-      ToastService.instance.showSuccess('Startup type set.');
-    } on SshServiceException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() {
-        _startupType = originalType;
-        _startupLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(SshServiceException(
-        SshServiceErrorCode.operationFailed,
-        e.toString(),
-      ));
-      setState(() {
-        _startupType = originalType;
-        _startupLoading = false;
-      });
-    }
-  }
-
-  String _statusLabel(SshServiceState state) => switch (state) {
-        SshServiceState.running => 'Running',
-        SshServiceState.stopped => 'Stopped',
-        SshServiceState.startPending => 'Start Pending',
-        SshServiceState.stopPending => 'Stop Pending',
-        SshServiceState.continuePending => 'Continue Pending',
-        SshServiceState.paused => 'Paused',
-        SshServiceState.unknown => 'Unknown',
-      };
+  String _statusLabel(SshServiceState state) => ServiceController.statusLabel(state);
 
   @override
   Widget build(BuildContext context) {
+    // Rebuild the tab whenever the controller publishes new state. The
+    // controller is a ChangeNotifier, so a plain listenable is enough; the tab
+    // no longer needs a setState per state transition.
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final theme = ShadTheme.of(context);
     final isElevated = SettingsService.isProcessElevated();
     final isOnceMode = SettingsService.elevationModeNotifier.value == SettingsService.modeOnce;
@@ -467,11 +360,11 @@ class _ServiceTabState extends State<ServiceTab> {
                 children: [
                   const Text('Agent Status'),
                   const SizedBox(width: 8),
-                  if (!_loading)
+                  if (!_controller.isLoading)
                     ShadBadge(
                       child: Text(
-                        _status != null
-                            ? _statusLabel(_status!)
+                        _controller.status != null
+                            ? _statusLabel(_controller.status!)
                             : 'Unknown',
                       ),
                     ),
@@ -480,7 +373,7 @@ class _ServiceTabState extends State<ServiceTab> {
               description: const Text('Current state of the ssh-agent service'),
               child: Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: _loading
+                child: _controller.isLoading
                     ? Row(
                         children: [
                           const SizedBox(
@@ -500,7 +393,7 @@ class _ServiceTabState extends State<ServiceTab> {
                             button: true,
                             label: 'Start Service',
                             child: ShadButton(
-                              onPressed: _loading ? null : _startService,
+                              onPressed: _controller.isLoading ? null : _controller.start,
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -517,7 +410,7 @@ class _ServiceTabState extends State<ServiceTab> {
                                 button: true,
                                 label: 'Stop Service',
                                 child: ShadButton.destructive(
-                                  onPressed: (_loading || !adminEnabled) ? null : _stopService,
+                                  onPressed: (_controller.isLoading || !adminEnabled) ? null : _controller.stop,
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -556,7 +449,7 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
                             button: true,
                             label: 'Refresh Status',
                             child: ShadButton.outline(
-                              onPressed: _loading ? null : _refreshStatus,
+                              onPressed: _controller.isLoading ? null : _controller.refresh,
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -582,8 +475,8 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
               // select renders empty instead of asserting a value we did not
               // read. The helper text below explains that state.
               Widget selectWidget = ShadSelect<StartupType>(
-                initialValue: _startupType,
-                enabled: !_startupLoading && adminEnabled,
+                initialValue: _controller.startupType,
+                enabled: !_controller.isStartupTypeLoading && adminEnabled,
                 options: StartupType.values.map((type) {
                   final label =
                       type.name[0].toUpperCase() + type.name.substring(1);
@@ -598,7 +491,7 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
                   );
                 },
                 onChanged: (value) {
-                  if (value != null) _setStartupType(value);
+                  if (value != null) _controller.setStartupType(value);
                 },
               );
 
@@ -644,7 +537,8 @@ tooltip: 'Requires administrator privileges. Use the "Restart in Admin Mode" but
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       selectWidget,
-                      if (_startupType == null && !_startupLoading)
+                      if (_controller.startupType == null &&
+                          !_controller.isStartupTypeLoading)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: Text(

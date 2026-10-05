@@ -81,6 +81,30 @@ class HostRow extends StatelessWidget {
               RowAction(
                 label: 'Check',
                 onPressed: isHostsLoading || isChecking ? null : onCheck,
+                // Busy feedback on the button itself. The scan runs off to the
+                // side and the button is disabled while it does, so without this
+                // the row looked frozen: a greyed-out button that could be
+                // either "not available" or "already working on this". The label
+                // stays, so the row does not change width mid-scan; the spinner
+                // is what carries the state.
+                leading: isChecking
+                    ? SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          // primary, not primaryForeground. The shadcn
+                          // spinner example uses primaryForeground because that
+                          // sits on a filled button's primary background. This
+                          // button is a ghost: transparent background over the
+                          // card, whose foreground is the dark primary. The two
+                          // measured values in this theme are primary
+                          // rgb(0.06, 0.09, 0.16) and primaryForeground
+                          // rgb(0.97, 0.98, 0.99), so primaryForeground here
+                          // would be a near-white spinner on a light card.
+                          color: theme.colorScheme.primary,
+                        ),
+                      )
+                    : null,
                 enabledTooltip:
                     'Scan $host and show the keys it offers, to compare '
                     'with what known_hosts already has',

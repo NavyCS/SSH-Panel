@@ -12,6 +12,7 @@ class RowAction {
     required this.enabledTooltip,
     this.disabledTooltip,
     this.icon,
+    this.leading,
   });
 
   /// Visible button text, e.g. `Load`.
@@ -30,6 +31,17 @@ class RowAction {
 
   /// Optional leading icon.
   final IconData? icon;
+
+  /// Optional leading widget, shown instead of [icon].
+  ///
+  /// For the cases an icon cannot express, chiefly a progress spinner shown
+  /// while the action runs. [icon] takes an `IconData`, and a spinner is not
+  /// one, so this is the only way to give a row action busy feedback without
+  /// rebuilding the button here.
+  ///
+  /// The caller owns the widget, including its size: pass a fixed-dimension box
+  /// so the row does not change width while the work is in flight.
+  final Widget? leading;
 
   bool get isEnabled => onPressed != null;
 
@@ -90,18 +102,26 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = action.isEnabled;
+    // Public final fields do not promote to non-null inside a conditional, so
+    // both are read into locals first.
+    final icon = action.icon;
+    final leading = action.leading;
+
     return DisabledActionWrapper(
       enabled: enabled,
       tooltip: action.tooltip,
       child: ShadButton.ghost(
         size: ShadButtonSize.sm,
         onPressed: action.onPressed,
-        child: action.icon == null
+        child: leading == null && icon == null
             ? Text(action.label)
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(action.icon, size: 14),
+                  if (leading != null)
+                    leading
+                  else
+                    Icon(icon, size: 14),
                   const SizedBox(width: 6),
                   Text(action.label),
                 ],

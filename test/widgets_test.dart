@@ -275,10 +275,10 @@ void main() {
   });
 
   group('HostRow status badge', () {
-    Widget row(String? status) => harness(HostRow(
+    Widget row(String? status, {bool isChecking = false}) => harness(HostRow(
           entry: const {'host': 'gitlab.com', 'keyType': 'ssh-ed25519'},
           status: status,
-          isChecking: false,
+          isChecking: isChecking,
           isHostsLoading: false,
           onCheck: _noop,
           onRemove: _noop,
@@ -338,6 +338,137 @@ void main() {
         find.bySemanticsLabel(RegExp(r'Host status for gitlab\.com: .*ssh-rsa')),
         findsOneWidget,
       );
+    });
+  });
+
+  group('HostRow busy feedback on Check', () {
+    Widget row({required bool isChecking}) => harness(HostRow(
+          entry: const {'host': 'gitlab.com', 'keyType': 'ssh-ed25519'},
+          status: 'ssh-ed25519',
+          isChecking: isChecking,
+          isHostsLoading: false,
+          onCheck: _noop,
+          onRemove: _noop,
+        ));
+
+    testWidgets('shows a spinner while the scan runs', (tester) async {
+      await tester.pumpWidget(row(isChecking: true));
+
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsOneWidget,
+        reason: 'a disabled button is ambiguous: unavailable, or already '
+            'working on this host. The spinner tells the two apart.',
+      );
+    });
+
+    testWidgets('shows no spinner when idle', (tester) async {
+      await tester.pumpWidget(row(isChecking: false));
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Check'), findsOneWidget);
+    });
+
+    testWidgets('keeps the Check label so the row does not change width',
+        (tester) async {
+      await tester.pumpWidget(row(isChecking: true));
+
+      // Swapping the label for a bare spinner would resize the button mid-scan
+      // and shuffle every row below it.
+      expect(find.text('Check'), findsOneWidget);
+    });
+
+    testWidgets('the spinner is a fixed size, not an unbounded one', (tester) async {
+      await tester.pumpWidget(row(isChecking: true));
+
+      // An unbounded indicator inside a Row would throw rather than shrink.
+      final size = tester.getSize(find.byType(CircularProgressIndicator));
+      expect(size.width, lessThanOrEqualTo(16));
+      expect(size.height, lessThanOrEqualTo(16));
+    });
+
+    testWidgets('the spinner uses the ghost foreground, not primaryForeground',
+        (tester) async {
+      await tester.pumpWidget(row(isChecking: true));
+
+      // Measured in this app's theme: primary is rgb(0.06, 0.09, 0.16) and
+      // primaryForeground is rgb(0.97, 0.98, 0.99). The shadcn spinner example
+      // uses primaryForeground because it sits on a filled button's primary
+      // background. This button is a ghost over the light card, so
+      // primaryForeground would be a near-white spinner on a near-white surface.
+      final indicator = tester.widget<CircularProgressIndicator>(
+        find.byType(CircularProgressIndicator),
+      );
+      final context = tester.element(find.byType(CircularProgressIndicator));
+      final scheme = ShadTheme.of(context).colorScheme;
+
+      // `color` is the field on the widget; `valueColor` is derived from it in
+      // the State and is always null here.
+      expect(
+        indicator.color,
+        scheme.primary,
+        reason: 'a ghost button draws on the card, not on a primary fill',
+      );
+      expect(
+        indicator.color,
+        isNot(scheme.primaryForeground),
+        reason: 'this theme resolves primaryForeground to near-white',
+      );
+    });
+
+    testWidgets('cannot start a second scan while one runs', (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(harness(HostRow(
+        entry: const {'host': 'gitlab.com', 'keyType': 'ssh-ed25519'},
+        status: 'ssh-ed25519',
+        isChecking: true,
+        isHostsLoading: false,
+        onCheck: () => taps++,
+        onRemove: _noop,
+      )));
+
+      // A missed hit is the expected outcome here, not a mistake in the test: while
+      // a scan runs the button is wrapped in IgnorePointer, so the pointer never
+      // reaches the callback at all.
+      await tester.tap(find.text('Check'), warnIfMissed: false);
+      await tester.pump();
+      expect(taps, 0);
+    });
+  });
+
+  group('ActionRow leading widget', () {
+    testWidgets('renders a leading widget instead of an icon', (tester) async {
+      await tester.pumpWidget(harness(const ActionRow(
+        actions: [
+          RowAction(
+            label: 'Check',
+            onPressed: _noop,
+            enabledTooltip: 'e',
+            leading: SizedBox.square(dimension: 14),
+          ),
+        ],
+      )));
+
+      expect(find.byType(SizedBox), findsWidgets);
+      expect(find.text('Check'), findsOneWidget);
+      expect(find.byType(Icon), findsNothing,
+          reason: 'leading takes precedence over icon');
+    });
+
+    testWidgets('still honours icon when no leading widget is given',
+        (tester) async {
+      await tester.pumpWidget(harness(const ActionRow(
+        actions: [
+          RowAction(
+            label: 'Load',
+            onPressed: _noop,
+            enabledTooltip: 'e',
+            icon: LucideIcons.plus,
+          ),
+        ],
+      )));
+
+      expect(find.byIcon(LucideIcons.plus), findsOneWidget);
     });
   });
 }

@@ -161,6 +161,56 @@ class KeysController extends ChangeNotifier {
     return _KeyMetadata(fingerprints, hasPub, comments);
   }
 
+  /// The contents of the `.pub` file that sits next to the key at [path].
+  ///
+  /// Returns `null` when there is no `.pub` file, which is also when the
+  /// "View public key" action should be unavailable.
+  Future<String?> readPublicKey(String path) async {
+    try {
+      return await _keyManager.readPublicKey(path);
+    } catch (e) {
+      if (_disposed) return null;
+      ToastService.instance.showError(
+          e is Exception ? e : Exception(e.toString()));
+      return null;
+    }
+  }
+
+  /// Unloads the key at [path] from the agent without deleting the file.
+  ///
+  /// Distinct from [deleteKeyFile], which also removes the file; the delete
+  /// flow needs to unload first and only then remove.
+  Future<void> removeKeyFromAgent(String path) async {
+    try {
+      await _keyManager.removeKey(path);
+      if (_disposed) return;
+      await refresh();
+    } on SshKeyException catch (e) {
+      if (_disposed) return;
+      ToastService.instance.showError(e);
+    } catch (e) {
+      if (_disposed) return;
+      ToastService.instance.showError(
+          e is Exception ? e : Exception(e.toString()));
+    }
+  }
+
+  /// Whether the key at [path] is encrypted and therefore needs a passphrase.
+  ///
+  /// The caller uses this to decide whether to prompt before calling
+  /// [loadKey]; reading a passphrase needs a dialog, which a controller has no
+  /// way to open.
+  Future<bool> hasPassphrase(String path) async {
+    try {
+      return await _keyManager.hasPassphrase(path);
+    } catch (e) {
+      if (_disposed) return false;
+      ToastService.instance.showError(
+          e is Exception ? e : Exception(e.toString()));
+      return false;
+    }
+  }
+
   /// Loads the key at [path] into the agent.
   ///
   /// [passphrase] must already be collected by the caller: reading it needs a
@@ -170,11 +220,18 @@ class KeysController extends ChangeNotifier {
     try {
       await _keyManager.addKey(path, passphrase: passphrase);
       if (_disposed) return;
-      ToastService.instance.showSuccess('Key loaded.');
+      ToastService.instance.showSuccess('Key added.');
       await refresh();
     } on SshKeyException catch (e) {
       if (_disposed) return;
-      ToastService.instance.showError(e);
+      // A wrong passphrase is a recoverable user error with an obvious cause,
+      // so it gets plain wording instead of the typed exception text.
+      if (e.code == SshKeyErrorCode.wrongPassphrase) {
+        ToastService.instance
+            .showErrorMessage('The passphrase is incorrect.');
+      } else {
+        ToastService.instance.showError(e);
+      }
     } catch (e) {
       if (_disposed) return;
       ToastService.instance.showError(
@@ -340,17 +397,23 @@ class KeysController extends ChangeNotifier {
   /// Deletes the private key at [path] and its `.pub`.
   ///
   /// Unloads it from the agent first when it is loaded, so the agent is never
-  /// left holding a key whose file no longer exists.
+  /// left holding a key whose file no longer exists. That unload is
+  /// best-effort: a failure there is reported but does not stop the delete,
+  /// which is what the tab did before -- refusing to delete would leave the
+  /// user unable to remove a file the agent had wedged itself on.
   Future<void> deleteKeyFile(String path) async {
     _setLoading(true);
     try {
       if (isKeyLoaded(path)) {
-        await _keyManager.removeKey(path);
-        if (_disposed) return;
+        try {
+          await _keyManager.removeKey(path);
+        } on SshKeyException catch (e) {
+          if (!_disposed) ToastService.instance.showError(e);
+        }
       }
       await _keyManager.deleteKeyFile(path);
       if (_disposed) return;
-      ToastService.instance.showSuccess('Key deleted.');
+      ToastService.instance.showSuccess('Key file deleted.');
       await refresh();
     } on SshKeyException catch (e) {
       if (_disposed) return;

@@ -7,8 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
 import 'features/domains/domains_controller.dart';
+import 'features/keys/keys_controller.dart';
 import 'features/service/service_controller.dart';
-import 'services/agent_state.dart';
 import 'services/settings_service.dart';
 import 'services/ssh_domains.dart';
 import 'services/ssh_keys.dart';
@@ -588,160 +588,39 @@ class KeysTab extends StatefulWidget {
 }
 
 class _KeysTabState extends State<KeysTab> {
-  final _keyManager = SshKeyManager();
-  final _serviceManager = SshServiceManager();
-  List<String> _keyFiles = [];
-  List<LoadedKey> _loadedKeys = [];
-  List<AuthorizedKey> _authorizedKeys = [];
-  Map<String, String> _keyFingerprints = {};
-  Map<String, bool> _hasPubKey = {};
-  Map<String, String> _keyComments = {};
-  bool _loading = false;
-  bool _agentRunning = false;
-
-  /// Incremented by every [_refresh]. Used to discard the results of a
-  /// superseded run so a slow earlier call cannot overwrite a newer one.
-  int _refreshGeneration = 0;
+  /// State and I/O live in [KeysController]. Only the dialogs stay here,
+  /// because they need a [BuildContext].
+  final _controller = KeysController();
 
   @override
   void initState() {
     super.initState();
-    _refresh();
-    // When the Service tab starts or stops the agent, refresh this tab so
-    // Load/Unload buttons and the Loaded Keys card stay in sync.
-    agentServiceState.addListener(_onAgentServiceChanged);
-  }
-
-  void _onAgentServiceChanged() {
-    if (mounted) _refresh();
+    // The controller subscribes to agentServiceState itself, so a start or stop
+    // on the Service tab reloads the Load/Unload state and the Loaded Keys card
+    // without this widget knowing about it.
+    _controller.refresh();
   }
 
   @override
   void dispose() {
-    agentServiceState.removeListener(_onAgentServiceChanged);
+    _controller.dispose();
     super.dispose();
   }
 
   Future<void> _refresh() async {
-    if (!mounted) return;
-    // Generation guard. _refresh runs six sequential awaits, so two clicks on
-    // Refresh (or a click while a previous refresh is still in flight) used to
-    // start two overlapping runs that raced to assign _keyFiles/_loadedKeys.
-    // Whichever finished last won, which could be the *older* run. Each call
-    // now claims a generation; only the newest one may commit.
-    final generation = ++_refreshGeneration;
-    setState(() {
-      _loading = true;
-    });
-    try {
-      final keyFiles = await _keyManager.listKeyFiles()
-          .timeout(const Duration(seconds: 30));
-      final authorizedKeys = await _keyManager.listAuthorizedKeys()
-          .timeout(const Duration(seconds: 30));
-
-      // Query the agent state first. When it is stopped, `ssh-add -l` would
-      // hang trying to reach the named pipe, so we skip it entirely.
-      SshServiceState agentState;
-      try {
-        agentState = await _serviceManager.checkStatus();
-      } catch (_) {
-        agentState = SshServiceState.stopped;
-      }
-      final agentRunning = agentState == SshServiceState.running;
-
-      final loadedKeys = agentRunning
-          ? await _keyManager.listLoadedKeys()
-              .timeout(const Duration(seconds: 30))
-          : <LoadedKey>[];
-
-      final fingerprints = <String, String>{};
-      final hasPub = <String, bool>{};
-      final comments = <String, String>{};
-      for (final path in keyFiles) {
-        final fp = await _keyManager.getKeyFingerprint(path);
-        if (fp != null) {
-          fingerprints[path] = fp;
-        }
-        hasPub[path] = await File('$path.pub').exists();
-        final comment = await _keyManager.getKeyComment(path);
-        if (comment != null && comment.isNotEmpty) {
-          comments[path] = comment;
-        }
-      }
-
-      if (!mounted) return;
-      // A newer refresh has started while this one was awaiting; drop these
-      // results so they cannot overwrite fresher state.
-      if (generation != _refreshGeneration) return;
-      setState(() {
-        _keyFiles = keyFiles;
-        _loadedKeys = loadedKeys;
-        _keyFingerprints = fingerprints;
-        _hasPubKey = hasPub;
-        _keyComments = comments;
-        _authorizedKeys = authorizedKeys;
-        _agentRunning = agentRunning;
-        _loading = false;
-      });
-    } on TimeoutException catch (_) {
-      if (!mounted || generation != _refreshGeneration) return;
-      ToastService.instance.showError(
-          TimeoutException('Refresh timed out — the ssh-agent may be unresponsive.'));
-      setState(() => _loading = false);
-    } on SshKeyException catch (e) {
-      if (!mounted || generation != _refreshGeneration) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted || generation != _refreshGeneration) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
+    await _controller.refresh();
   }
 
   Future<void> _addKey(String path) async {
-    setState(() {
-      _loading = true;
-    });
-    try {
-      if (await _keyManager.hasPassphrase(path)) {
-        final passphrase = await _promptPassphrase();
-        if (passphrase == null) {
-          if (!mounted) return;
-          setState(() => _loading = false);
-          return;
-        }
-        await _keyManager.addKey(path, passphrase: passphrase);
-        if (!mounted) return;
-        await _refresh();
-        if (mounted) {
-          ToastService.instance.showSuccess('Key added.');
-        }
-      } else {
-        await _keyManager.addKey(path);
-        if (!mounted) return;
-        await _refresh();
-        if (mounted) {
-          ToastService.instance.showSuccess('Key added.');
-        }
-      }
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      if (e.code == SshKeyErrorCode.wrongPassphrase) {
-        ToastService.instance.showErrorMessage('The passphrase is incorrect.');
-      } else {
-        ToastService.instance.showError(e);
-      }
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
+    // The passphrase dialog lives here because it needs a BuildContext;
+    // everything after it is the controller's job.
+    String? passphrase;
+    if (await _controller.hasPassphrase(path)) {
+      passphrase = await _promptPassphrase();
+      if (passphrase == null) return;
     }
+    if (!mounted) return;
+    await _controller.loadKey(path, passphrase);
   }
 
   /// Shows a dialog requesting the passphrase for a protected key.
@@ -761,49 +640,11 @@ class _KeysTabState extends State<KeysTab> {
   }
 
   Future<void> _removeKey(String path) async {
-    setState(() {
-      _loading = true;
-    });
-    try {
-      await _keyManager.removeKey(path);
-      await _refresh();
-      if (mounted) {
-        ToastService.instance.showSuccess('Key removed.');
-      }
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
+    await _controller.unloadKey(path);
   }
 
   Future<void> _removeAll() async {
-    setState(() {
-      _loading = true;
-    });
-    try {
-      await _keyManager.removeAll();
-      await _refresh();
-      if (mounted) {
-        ToastService.instance.showSuccess('All keys removed.');
-      }
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
+    await _controller.unloadAll();
   }
 
   Future<_KeyGenerationParams?> _promptKeyGeneration() async {
@@ -928,7 +769,7 @@ class _KeysTabState extends State<KeysTab> {
     );
     if (replace != true || !mounted) return;
 
-    final dir = _keyManager.sshDirectory;
+    final dir = _controller.sshDirectory;
     final keyPath = '$dir${Platform.pathSeparator}$keyName';
     final pubPath = '$keyPath.pub';
     try {
@@ -943,7 +784,7 @@ class _KeysTabState extends State<KeysTab> {
     }
 
     try {
-      await _keyManager.generateKey(
+      await _controller.generateKey(
         name: keyName,
         algorithm: algorithm,
         comment: comment,
@@ -958,7 +799,6 @@ class _KeysTabState extends State<KeysTab> {
       ToastService.instance.showError(e is Exception
           ? e
           : Exception(e.toString()));
-      setState(() => _loading = false);
     }
   }
 
@@ -985,12 +825,9 @@ class _KeysTabState extends State<KeysTab> {
       if (passphrase == null) return;
     }
 
-    setState(() {
-      _loading = true;
-    });
 
     try {
-      await _keyManager.generateKey(
+      await _controller.generateKey(
         name: params.effectiveName,
         algorithm: params.algorithm,
         comment: params.comment,
@@ -1006,44 +843,24 @@ class _KeysTabState extends State<KeysTab> {
         await _handleExistingKeyConflict(params.effectiveName, params.algorithm, params.comment, passphrase);
       } else {
         ToastService.instance.showError(e);
-        setState(() => _loading = false);
       }
     } catch (e) {
       if (!mounted) return;
       ToastService.instance.showError(e is Exception
           ? e
           : Exception(e.toString()));
-      setState(() => _loading = false);
     }
   }
 
-  String _shortPath(String path) {
-    final parts = path.split(RegExp(r'[/\\]'));
-    return parts.isNotEmpty ? parts.last : path;
-  }
+  String _shortPath(String path) => KeysController.shortPath(path);
 
   void _openSshFolder() {
-    final dir = _keyManager.sshDirectory;
+    final dir = _controller.sshDirectory;
     if (dir.isEmpty) return;
     Process.run('explorer', [dir], runInShell: false);
   }
 
-  bool _isKeyLoaded(String path) {
-    final fp = _keyFingerprints[path];
-    if (fp != null && fp.isNotEmpty) {
-      if (_loadedKeys.any((k) => k.fingerprint == fp)) {
-        return true;
-      }
-    }
-    final normalizedPath = path.replaceAll('/', '\\').toLowerCase();
-    final fileName = _shortPath(path).toLowerCase();
-    return _loadedKeys.any((k) {
-      final kPath = k.path.replaceAll('/', '\\').toLowerCase();
-      return kPath == normalizedPath ||
-          kPath.endsWith('\\$fileName') ||
-          kPath == fileName;
-    });
-  }
+  bool _isKeyLoaded(String path) => _controller.isKeyLoaded(path);
 
   Future<void> _addAuthorizedKeyDialog() async {
     final keyController = TextEditingController();
@@ -1089,12 +906,9 @@ class _KeysTabState extends State<KeysTab> {
     final text = keyController.text.trim();
     if (text.isEmpty) return;
 
-    setState(() {
-      _loading = true;
-    });
 
     try {
-      await _keyManager.addAuthorizedKey(text);
+      await _controller.addAuthorizedKey(text);
       await _refresh();
       if (mounted) {
         ToastService.instance.showSuccess('Authorized key added.');
@@ -1102,13 +916,11 @@ class _KeysTabState extends State<KeysTab> {
     } on SshKeyException catch (e) {
       if (!mounted) return;
       ToastService.instance.showError(e);
-      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
       ToastService.instance.showError(e is Exception
           ? e
           : Exception(e.toString()));
-      setState(() => _loading = false);
     }
   }
 
@@ -1144,34 +956,16 @@ class _KeysTabState extends State<KeysTab> {
 
     if (confirmed != true) return;
 
-    setState(() {
-      _loading = true;
-    });
-
-    try {
-      await _keyManager.removeAuthorizedKey(key.rawLine);
-      await _refresh();
-      if (mounted) {
-        ToastService.instance.showSuccess('Authorized key removed.');
-      }
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
+    // The controller refreshes internally, so the extra _refresh() here was a
+    // second full reload of keys, agent state and authorized_keys.
+    await _controller.removeAuthorizedKey(key.rawLine);
   }
 
 Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final isLoaded = _isKeyLoaded(path);
-    final canLoad = !_loading && _agentRunning && !isLoaded;
-    final canUnload = !_loading && _agentRunning && isLoaded;
-    final hasPub = _hasPubKey[path] ?? false;
+    final canLoad = !_controller.isLoading && _controller.agentRunning && !isLoaded;
+    final canUnload = !_controller.isLoading && _controller.agentRunning && isLoaded;
+    final hasPub = _controller.hasPublicKey(path);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1190,9 +984,9 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                   _shortPath(path),
                   style: theme.textTheme.small,
                 ),
-                if (_keyComments[path] != null && _keyComments[path]!.isNotEmpty)
+                if (_controller.commentOf(path) != null && _controller.commentOf(path)!.isNotEmpty)
                   Text(
-                    _keyComments[path]!,
+                    _controller.commentOf(path)!,
                     style: theme.textTheme.muted,
                   ),
               ],
@@ -1206,7 +1000,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               RowAction(
                 label: 'View',
                 onPressed:
-                    !_loading && hasPub ? () => _viewPublicKey(path) : null,
+                    !_controller.isLoading && hasPub ? () => _viewPublicKey(path) : null,
                 enabledTooltip: 'View public key of ${_shortPath(path)}',
                 disabledTooltip: 'No .pub file for ${_shortPath(path)}',
               ),
@@ -1214,7 +1008,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 label: 'Load',
                 onPressed: canLoad ? () => _addKey(path) : null,
                 enabledTooltip: 'Load ${_shortPath(path)} into ssh-agent',
-                disabledTooltip: !_agentRunning
+                disabledTooltip: !_controller.agentRunning
                     ? 'Start the ssh-agent service first'
                     : 'Key is already loaded in agent',
               ),
@@ -1222,13 +1016,13 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 label: 'Unload',
                 onPressed: canUnload ? () => _removeKey(path) : null,
                 enabledTooltip: 'Unload ${_shortPath(path)} from ssh-agent',
-                disabledTooltip: !_agentRunning
+                disabledTooltip: !_controller.agentRunning
                     ? 'Start the ssh-agent service first'
                     : 'Key is not loaded in agent',
               ),
               RowAction(
                 label: 'Delete',
-                onPressed: !_loading ? () => _deleteKeyFile(path) : null,
+                onPressed: !_controller.isLoading ? () => _deleteKeyFile(path) : null,
                 enabledTooltip:
                     'Delete ${_shortPath(path)} and its .pub file',
                 disabledTooltip: 'Wait for the current operation to finish',
@@ -1242,7 +1036,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
 
   /// Shows a dialog with the public key for [path], with Copy and Close actions.
   Future<void> _viewPublicKey(String path) async {
-    final pubKey = await _keyManager.readPublicKey(path);
+    final pubKey = await _controller.readPublicKey(path);
     if (pubKey == null || pubKey.isEmpty) {
       if (!mounted) return;
       ToastService.instance
@@ -1329,40 +1123,23 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
 
     if (confirmed != true) return;
 
-    setState(() {
-      _loading = true;
-    });
-
-    try {
-      // Unload from the agent before deleting the file from disk.
-      if (_isKeyLoaded(path)) {
-        try {
-          await _keyManager.removeKey(path);
-        } on SshKeyException catch (e) {
-          ToastService.instance.showError(e);
-        }
-      }
-
-      await _keyManager.deleteKeyFile(path);
-      await _refresh();
-      if (mounted) {
-        ToastService.instance.showSuccess('Key file deleted.');
-      }
-    } on SshKeyException catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e);
-      setState(() => _loading = false);
-    } catch (e) {
-      if (!mounted) return;
-      ToastService.instance.showError(e is Exception
-          ? e
-          : Exception(e.toString()));
-      setState(() => _loading = false);
-    }
+    // Unload-then-delete and the refresh both live in the controller, so this
+    // used to call removeKey and then deleteKeyFile, which unloaded twice.
+    await _controller.deleteKeyFile(path);
   }
 
   @override
   Widget build(BuildContext context) {
+    // Without this the tab renders once and then never updates: every field it
+    // reads now lives on the controller, which notifies instead of calling
+    // setState.
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final theme = ShadTheme.of(context);
 
     return SingleChildScrollView(
@@ -1378,7 +1155,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 button: true,
                 label: 'Generate Key',
                 child: ShadButton(
-                  onPressed: _loading ? null : _generateKey,
+                  onPressed: _controller.isLoading ? null : _generateKey,
                   child: const Text('Generate'),
                 ),
               ),
@@ -1387,7 +1164,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 label: 'Unload All Keys',
                 child: Builder(
                   builder: (context) {
-                    final canUnloadAll = !_loading && _agentRunning;
+                    final canUnloadAll = !_controller.isLoading && _controller.agentRunning;
                     final unloadAllBtn = ShadButton.outline(
                       onPressed: canUnloadAll ? _removeAll : null,
                       child: const Text('Unload All'),
@@ -1395,7 +1172,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                     if (!canUnloadAll) {
                       return DisabledActionWrapper(
                         enabled: false,
-                        tooltip: _loading
+                        tooltip: _controller.isLoading
                             ? 'Loading...'
                             : 'The ssh-agent service is not running. Start it on the Service tab first.',
                         child: unloadAllBtn,
@@ -1409,7 +1186,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 button: true,
                 label: 'Refresh Keys',
                 child: ShadButton.ghost(
-                  onPressed: _loading ? null : _refresh,
+                  onPressed: _controller.isLoading ? null : _refresh,
                   child: const Text('Refresh'),
                 ),
               ),
@@ -1435,8 +1212,8 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                 ),
               ],
             ),
-            description: Text('${_keyFiles.length} file(s) in ~/.ssh'),
-            child: _loading
+            description: Text('${_controller.keyFiles.length} file(s) in ~/.ssh'),
+            child: _controller.isLoading
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
@@ -1445,7 +1222,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : _keyFiles.isEmpty
+                : _controller.keyFiles.isEmpty
                     ? Padding(
                         padding: const EdgeInsets.all(12),
                         child: Text(
@@ -1455,7 +1232,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                       )
                     : Column(
                         children: [
-                          for (final path in _keyFiles)
+                          for (final path in _controller.keyFiles)
                             // KeyedSubtree because _buildKeyFileRow is a
                             // helper method, not a widget, so it cannot take a
                             // key itself. Without a stable identity Flutter
@@ -1486,8 +1263,8 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           // ---- Loaded keys card ----
           ShadCard(
             title: const Text('Loaded Keys'),
-            description: Text('${_loadedKeys.length} key(s) in agent'),
-            child: _loading
+            description: Text('${_controller.loadedKeys.length} key(s) in agent'),
+            child: _controller.isLoading
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
@@ -1496,7 +1273,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : !_agentRunning
+                : !_controller.agentRunning
                     ? SizedBox(
                         width: double.infinity,
                         child: Padding(
@@ -1516,7 +1293,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                           ),
                         ),
                       )
-                    : _loadedKeys.isEmpty
+                    : _controller.loadedKeys.isEmpty
                         ? SizedBox(
                             width: double.infinity,
                             child: Padding(
@@ -1529,7 +1306,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                           )
                         : Column(
                         children: [
-                          for (final key in _loadedKeys)
+                          for (final key in _controller.loadedKeys)
                             // Keyed by fingerprint: that is the identity the
                             // agent assigns, and it survives a re-sort.
                             KeyedSubtree(
@@ -1571,16 +1348,16 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                   label: 'Add Key to authorized_keys',
                   child: ShadButton.outline(
                     size: ShadButtonSize.sm,
-                    onPressed: _loading ? null : _addAuthorizedKeyDialog,
+                    onPressed: _controller.isLoading ? null : _addAuthorizedKeyDialog,
                     child: const Text('Add Key'),
                   ),
                 ),
               ],
             ),
             description: Text(
-              '${_authorizedKeys.length} authorized key(s) in ~/.ssh/authorized_keys',
+              '${_controller.authorizedKeys.length} authorized key(s) in ~/.ssh/authorized_keys',
             ),
-            child: _loading
+            child: _controller.isLoading
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
@@ -1589,7 +1366,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : _authorizedKeys.isEmpty
+                : _controller.authorizedKeys.isEmpty
                     ? Padding(
                         padding: const EdgeInsets.all(12),
                         child: Text(
@@ -1599,7 +1376,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                       )
                     : Column(
                         children: [
-                          for (final key in _authorizedKeys)
+                          for (final key in _controller.authorizedKeys)
                             Padding(
                               padding: const EdgeInsets.symmetric(vertical: 6),
                               child: Row(
@@ -1644,7 +1421,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                                       label: 'Remove key from authorized_keys',
                                       child: ShadButton.ghost(
                                         size: ShadButtonSize.sm,
-                                        onPressed: _loading
+                                        onPressed: _controller.isLoading
                                             ? null
                                             : () => _removeAuthorizedKey(key),
                                         child: const Icon(

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:ssh_panel/features/domains/add_host_field.dart';
+import 'package:ssh_panel/features/domains/host_row.dart';
 import 'package:ssh_panel/shared/widgets/action_row.dart';
 import 'package:ssh_panel/shared/widgets/disabled_action_wrapper.dart';
 import 'package:ssh_panel/shared/widgets/host_status_badge.dart';
@@ -270,6 +271,73 @@ void main() {
       )));
 
       expect(find.textContaining('example.com'), findsWidgets);
+    });
+  });
+
+  group('HostRow status badge', () {
+    Widget row(String? status) => harness(HostRow(
+          entry: const {'host': 'gitlab.com', 'keyType': 'ssh-ed25519'},
+          status: status,
+          isChecking: false,
+          isHostsLoading: false,
+          onCheck: _noop,
+          onRemove: _noop,
+        ));
+
+    // These assert structure, not hover. Mouse hover cannot be simulated
+    // faithfully in a widget test here -- Flutter's own Tooltip fails to appear
+    // over a bare Text -- so what is pinned is that the tooltip is given a
+    // region the pointer can actually be detected on. Whether the tooltip then
+    // appears has to be confirmed in the running app.
+    testWidgets('the badge sits in an opaque hover region', (tester) async {
+      await tester.pumpWidget(row('ssh-ed25519, ecdsa-sha2-nistp256, ssh-rsa'));
+
+      // Scoped to the badge's own detector: the row's Check and Remove buttons
+      // each contain one of their own.
+      final detector = tester.widget<ShadGestureDetector>(find.ancestor(
+        of: find.byType(HostStatusBadge),
+        matching: find.byType(ShadGestureDetector),
+      ));
+      expect(
+        detector.behavior,
+        HitTestBehavior.opaque,
+        reason: 'ShadTooltip detects the pointer with deferToChild, so the '
+            'badge needs an opaque region or the hover never registers',
+      );
+      expect(find.byType(HostStatusBadge), findsOneWidget);
+    });
+
+    testWidgets('that region is not a button', (tester) async {
+      await tester.pumpWidget(row('ssh-ed25519'));
+
+      // A status is read-only. Giving it tap callbacks would put a dead control
+      // in the tab order, the exact defect the badge was built to avoid.
+      final detector = tester.widget<ShadGestureDetector>(find.ancestor(
+        of: find.byType(HostStatusBadge),
+        matching: find.byType(ShadGestureDetector),
+      ));
+      expect(detector.onTap, isNull);
+      expect(detector.onLongPress, isNull);
+    });
+
+    testWidgets('no badge before the host has been checked', (tester) async {
+      await tester.pumpWidget(row(null));
+
+      // null means "never checked", which is not the same as "checked and found
+      // nothing". Nothing is claimed, so nothing is shown.
+      expect(find.byType(HostStatusBadge), findsNothing);
+    });
+
+    testWidgets('a full algorithm list reaches the badge', (tester) async {
+      await tester.pumpWidget(row('ssh-ed25519, ecdsa-sha2-nistp256, ssh-rsa'));
+
+      // The badge itself only has room for the count; the names have to survive
+      // into the status string the tooltip quotes.
+      expect(find.text('3 keys found'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(RegExp(r'Host status for gitlab\.com: .*ssh-rsa')),
+        findsOneWidget,
+      );
     });
   });
 }

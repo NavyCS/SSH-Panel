@@ -111,9 +111,24 @@ class HostRow extends StatelessWidget {
                         ? status
                         : 'Key types offered by $host: $status',
               ),
-              child: Semantics(
-                label: 'Host status for $host: $status',
-                child: HostStatusBadge(status: status),
+              // The opaque detector exists only to give the tooltip something
+              // to detect the pointer on. ShadTooltip wraps its child in a
+              // ShadMouseArea with HitTestBehavior.deferToChild, so the hover is
+              // only registered if the child joins the mouse hit-test path --
+              // which is why the tooltips on the row's ShadButton actions worked
+              // while this one, on a bare badge, never appeared. ShadButton gets
+              // that region from its own ShadGestureDetector; a status badge has
+              // no reason to own one, so it is supplied here.
+              //
+              // No tap callbacks on purpose: a status is read-only, and making it
+              // respond to the pointer would put a dead control in the tab order,
+              // which is the defect this badge was originally built to avoid.
+              child: ShadGestureDetector(
+                behavior: HitTestBehavior.opaque,
+                child: Semantics(
+                  label: 'Host status for $host: $status',
+                  child: HostStatusBadge(status: status),
+                ),
               ),
             ),
         ],

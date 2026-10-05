@@ -31,7 +31,8 @@ class KeysController extends ChangeNotifier {
   KeysController({
     SshKeyManager? keyManager,
     SshServiceManager? serviceManager,
-  })  : _keyManager = keyManager ?? SshKeyManager(),
+  })  : _keyManager = keyManager ??
+            SshKeyManager(onWarning: ToastService.instance.showErrorMessage),
         _serviceManager = serviceManager ?? SshServiceManager() {
     // The agent can be started or stopped from the Service tab while this tab
     // is open. Subscribing here keeps Load/Unload enabled state correct without

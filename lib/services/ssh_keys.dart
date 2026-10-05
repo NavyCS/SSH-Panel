@@ -179,9 +179,60 @@ class AuthorizedKey {
 
 /// Manages SSH key files and the ssh-agent's loaded identities.
 class SshKeyManager {
+  SshKeyManager({this.onWarning});
+
+  /// Called for failures that are reported but do not fail the operation --
+  /// currently only a temporary file that could not be deleted.
+  ///
+  /// Injected rather than calling `ToastService` directly: that service imports
+  /// this file, so a direct call would be a circular import. The keys
+  /// controller wires it to the toast.
+  final void Function(String message)? onWarning;
+
+  /// Reports a non-fatal problem. Always writes to stderr so it is never
+  /// silently lost, and forwards to [onWarning] when one was supplied.
+  void _warn(String message) {
+    stderr.writeln('Warning: $message');
+    onWarning?.call(message);
+  }
+
   // -----------------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------------
+
+  /// Restricts [directory] so only the current user and SYSTEM can read it.
+  ///
+  /// Files created inside afterwards inherit these entries, which is what
+  /// protects the decrypted key and the passphrase helper: they no longer pick
+  /// up whatever access the user profile happens to grant.
+  ///
+  /// Best-effort. If `icacls` is unavailable the files are still created and
+  /// the operation still works -- the caller only loses the hardening, so
+  /// failing loudly here would be worse than proceeding.
+  Future<void> _restrictToCurrentUser(Directory directory) async {
+    final user = Platform.environment['USERNAME'];
+    if (user == null || user.isEmpty) return;
+    try {
+      // /inheritance:r drops the inherited entries; (OI)(CI) makes the grants
+      // inheritable so files created inside are covered too. SYSTEM is
+      // referenced by SID so this does not depend on the OS language.
+      await Process.run(
+        'icacls.exe',
+        [
+          directory.path,
+          '/inheritance:r',
+          '/grant:r',
+          '$user:(OI)(CI)(F)',
+          '/grant:r',
+          '*S-1-5-18:(OI)(CI)(F)',
+        ],
+        runInShell: false,
+      );
+    } catch (e) {
+      stderr.writeln('Warning: could not restrict permissions on the '
+          'temporary directory: $e');
+    }
+  }
 
   /// Resolves `~/.ssh` using `USERPROFILE`.
   ///
@@ -204,10 +255,15 @@ class SshKeyManager {
   /// Runs a process with a timeout and throws [SshKeyException] if the
   /// binary is missing, the command exceeds [timeout] (default 30 s),
   /// or the process cannot be launched. The process is killed on timeout.
+  ///
+  /// [environment] is merged over the inherited environment. Needed for the
+  /// SSH_ASKPASS handshake, which is how a passphrase reaches `ssh-keygen`
+  /// without appearing in the process command line.
   Future<({int exitCode, List<int> stdout, List<int> stderr})> _runWithTimeout(
     String executable,
     List<String> arguments, {
     Duration timeout = const Duration(seconds: 30),
+    Map<String, String>? environment,
   }) async {
     // Nullable on purpose: when [Process.start] itself fails (for example the
     // binary is not on PATH) no Process is ever assigned. Declaring this `late`
@@ -216,7 +272,13 @@ class SshKeyManager {
     // code and hiding the "OpenSSH is not installed" message from the user.
     Process? process;
     try {
-      process = await Process.start(executable, arguments, runInShell: false);
+      process = await Process.start(
+        executable,
+        arguments,
+        runInShell: false,
+        environment: environment,
+        includeParentEnvironment: true,
+      );
 
       final stdoutFuture = process.stdout.expand((x) => x).toList();
       final stderrFuture = process.stderr.expand((x) => x).toList();
@@ -487,18 +549,52 @@ class SshKeyManager {
       );
     }
 
-    final tempDir = Directory.systemTemp;
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final tempFile = File('${tempDir.path}${Platform.pathSeparator}ssh_temp_$timestamp');
-
+    // A private directory rather than loose files in %TEMP%: everything this
+    // method writes -- the decrypted private key, the passphrase, and the
+    // helper that hands the passphrase over -- lands inside it, so one ACL
+    // change covers all of it.
+    Directory? workDir;
+    File? tempFile;
     try {
+      workDir = Directory.systemTemp.createTempSync('ssh_panel_');
+      await _restrictToCurrentUser(workDir);
+
+      final sep = Platform.pathSeparator;
+      tempFile = File('${workDir.path}${sep}key');
+
       await origFile.copy(tempFile.path);
 
-      // Decrypt the temporary copy via ssh-keygen -p -P <passphrase> -N "" -f <tempFile>
+      // The passphrase reaches ssh-keygen through SSH_ASKPASS rather than -P.
+      // Passing -P would put it in the process command line, where any process
+      // on the machine can read it: `Get-CimInstance Win32_Process`, the
+      // Details tab of Task Manager, and most EDR agents all expose it.
+      //
+      // stdin is not an option: ssh-keygen on Windows blocks forever without a
+      // TTY (verified here -- it hung until killed). SSH_ASKPASS with
+      // SSH_ASKPASS_REQUIRE=force works without a TTY.
+      //
+      // The helper is a .cmd that prints a sibling file, so the passphrase
+      // needs no cmd escaping -- `%`, `&`, `"` and friends would otherwise be
+      // mangled or injected into the command line.
+      final passphraseFile = File('${workDir.path}${sep}passphrase.txt');
+      final helperFile = File('${workDir.path}${sep}askpass.cmd');
+      await passphraseFile.writeAsString(passphrase, flush: true);
+      await helperFile.writeAsString(
+        '@echo off\r\ntype "%~dp0passphrase.txt"\r\n',
+        flush: true,
+      );
+
       final keygenResult = await _runWithTimeout(
         'ssh-keygen',
-        ['-p', '-P', passphrase, '-N', '', '-f', tempFile.path],
+        ['-p', '-N', '', '-f', tempFile.path],
         timeout: const Duration(seconds: 10),
+        environment: {
+          'SSH_ASKPASS': helperFile.path,
+          // Required on Windows, where ssh would otherwise insist on a TTY.
+          'SSH_ASKPASS_REQUIRE': 'force',
+          // Some builds only consult SSH_ASKPASS when DISPLAY is set.
+          'DISPLAY': 'ssh_panel',
+        },
       );
 
       if (keygenResult.exitCode != 0) {
@@ -541,17 +637,19 @@ class SshKeyManager {
       }
       rethrow;
     } finally {
-      try {
-        if (await tempFile.exists()) {
-          await tempFile.delete();
+      // Removing the directory takes the decrypted key, the passphrase file and
+      // the helper with it. Previously a failure here left an unencrypted
+      // private key in %TEMP% and only wrote to stderr, which is invisible in a
+      // release build -- so it now also reaches the user.
+      if (workDir != null && await workDir.exists()) {
+        try {
+          await workDir.delete(recursive: true);
+        } catch (e) {
+          _warn(
+            'A temporary file could not be deleted and may still contain an '
+            'unencrypted copy of your key: ${workDir.path} ($e)',
+          );
         }
-        final tempPub = File('${tempFile.path}.pub');
-        if (await tempPub.exists()) {
-          await tempPub.delete();
-        }
-      } catch (e) {
-        // Best-effort cleanup of temporary files; failures are non-fatal.
-        stderr.writeln('Notice: temp key file cleanup failed: $e');
       }
     }
   }

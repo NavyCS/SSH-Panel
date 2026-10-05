@@ -5,11 +5,12 @@
 /// semantics of a disabled control.
 library;
 
-import 'dart:ui' show SemanticsFlag;
+import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
+import 'package:ssh_panel/features/domains/add_host_field.dart';
 import 'package:ssh_panel/shared/widgets/action_row.dart';
 import 'package:ssh_panel/shared/widgets/disabled_action_wrapper.dart';
 import 'package:ssh_panel/shared/widgets/host_status_badge.dart';
@@ -193,6 +194,82 @@ void main() {
       // rebuilding and resetting every later row.
       expect(find.byKey(const ValueKey('View')), findsOneWidget);
       expect(find.byKey(const ValueKey('Load')), findsOneWidget);
+    });
+  });
+
+  group('AddHostField', () {
+    late TextEditingController hostController;
+
+    setUp(() => hostController = TextEditingController());
+    tearDown(() => hostController.dispose());
+
+    testWidgets('the tooltip quotes the host as it is typed',
+        (tester) async {
+      await tester.pumpWidget(harness(AddHostField(
+        hostController: hostController,
+        isScanning: false,
+        isHostsLoading: false,
+        onAdd: _noop,
+      )));
+
+      // The field listens to nothing but its own controller. The tooltip and
+      // the status line quote the typed host, so if they are read outside the
+      // listener they keep showing whatever was there at the last full rebuild
+      // -- which, on first mount, is an empty host.
+      await tester.enterText(find.byType(ShadInput), 'gitlab.com');
+      await tester.pump();
+
+      // ShadTooltip only builds its content once hovered, so a real mouse
+      // pointer has to enter the button.
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: Offset.zero);
+      await mouse.moveTo(tester.getCenter(find.text('Add')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('gitlab.com'),
+        findsWidgets,
+        reason: 'the tooltip must name the host the user just typed',
+      );
+      expect(
+        find.textContaining('scans  for its keys'),
+        findsNothing,
+        reason: 'an empty host in the message means the text was read stale',
+      );
+    });
+
+    testWidgets('shows the phase while scanning and blocks a second scan',
+        (tester) async {
+      var adds = 0;
+      await tester.pumpWidget(harness(AddHostField(
+        hostController: hostController,
+        isScanning: true,
+        isHostsLoading: false,
+        onAdd: () => adds++,
+      )));
+
+      expect(find.text('Scanning…'), findsOneWidget);
+      expect(find.textContaining('Step 1 of 2 · Scanning'), findsOneWidget);
+      // The field is disabled for the whole scan, so a second click cannot
+      // start a competing ssh-keyscan on the same host.
+      expect(tester.widget<ShadInput>(find.byType(ShadInput)).enabled, isFalse);
+
+      await tester.tap(find.text('Scanning…'));
+      await tester.pump();
+      expect(adds, 0);
+    });
+
+    testWidgets('names the host in the status line', (tester) async {
+      hostController.text = 'example.com';
+      await tester.pumpWidget(harness(AddHostField(
+        hostController: hostController,
+        isScanning: true,
+        isHostsLoading: false,
+        onAdd: _noop,
+      )));
+
+      expect(find.textContaining('example.com'), findsWidgets);
     });
   });
 }

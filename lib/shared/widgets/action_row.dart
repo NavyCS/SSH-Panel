@@ -39,7 +39,7 @@ class RowAction {
 }
 
 /// A row of small ghost buttons: the repeated View / Load / Unload / Delete
-/// cluster that ends every row in the Keys and Domains tabs.
+/// cluster that ends every row in the Keys and Hosts tabs.
 ///
 /// This exists because that cluster was copy-pasted per row, with two problems
 /// that repetition invites:

@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../services/ssh_domains.dart';
 import '../../toast_service.dart';
 
-/// Owns the state and file I/O of the Domains tab.
+/// Owns the state and file I/O of the Hosts tab.
 ///
 /// Split deliberately along the line between what needs a `BuildContext` and
 /// what does not. The confirmation dialogs stay in the widget — they are UI —
@@ -225,17 +225,23 @@ class DomainsController extends ChangeNotifier {
   }
 
   /// Appends [keyLines] to known_hosts for [host] and refreshes.
-  Future<void> addKnownHostKeys(String host, List<String> keyLines) async {
+  ///
+  /// Returns whether the keys were written. The caller needs this: a failed
+  /// write is reported here as an error toast and then swallowed, so without a
+  /// result the caller cannot tell success from failure and would go on to
+  /// announce a success that did not happen and clear the user's input.
+  Future<bool> addKnownHostKeys(String host, List<String> keyLines) async {
     try {
       await _configManager.writeKnownHostKeys(host, keyLines);
-      if (_disposed) return;
+      if (_disposed) return false;
       await refreshHosts();
+      return true;
     } on SshConfigException catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(e);
+      if (!_disposed) ToastService.instance.showError(e);
+      return false;
     } catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(_asException(e));
+      if (!_disposed) ToastService.instance.showError(_asException(e));
+      return false;
     }
   }
 

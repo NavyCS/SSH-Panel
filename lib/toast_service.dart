@@ -201,10 +201,17 @@ class ToastService {
     SshKeyErrorCode.invalidKeyName => 'Invalid key name',
   };
 
+  /// Titles for a config-domain failure.
+  ///
+  /// `readFailed` and `writeFailed` are deliberately not titled "config". Those
+  /// two codes are raised by `~/.ssh/config` *and* by `known_hosts`, and the
+  /// shared code used to make a failed `known_hosts` write announce itself as
+  /// "Could not write config". The body of the toast already names the file, so
+  /// the title stays generic instead of being wrong half the time.
   String _configTitle(SshConfigException e) => switch (e.code) {
     SshConfigErrorCode.userProfileNotSet => 'User profile not set',
-    SshConfigErrorCode.readFailed => 'Could not read config',
-    SshConfigErrorCode.writeFailed => 'Could not write config',
+    SshConfigErrorCode.readFailed => 'Could not read the file',
+    SshConfigErrorCode.writeFailed => 'Could not write the file',
     SshConfigErrorCode.keyscanFailed => 'Host scan failed',
     SshConfigErrorCode.invalidHost => 'Invalid host',
     SshConfigErrorCode.hostNotFound => 'Host not found',

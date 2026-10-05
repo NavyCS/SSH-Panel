@@ -6,7 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 
+import 'features/domains/add_host_field.dart';
 import 'features/domains/domains_controller.dart';
+import 'features/domains/host_row.dart';
+import 'features/domains/select_keys_dialog.dart';
 import 'features/keys/keys_controller.dart';
 import 'features/service/service_controller.dart';
 import 'services/path_guard.dart';
@@ -19,7 +22,6 @@ import 'shared/plural.dart';
 import 'shared/widgets/agent_status_badge.dart';
 import 'shared/widgets/action_row.dart';
 import 'shared/widgets/disabled_action_wrapper.dart';
-import 'shared/widgets/host_status_badge.dart';
 import 'toast_service.dart';
 
 /// Re-exported so the tabs keep importing it from the entrypoint while the
@@ -425,7 +427,7 @@ class _SshPanelShellState extends State<SshPanelShell> {
                   value: 'domains',
                   content: const DomainsTab(),
                   expandContent: true,
-                  child: const Text('Domains'),
+                  child: const Text('Hosts'),
                 ),
               ],
             ),
@@ -1619,7 +1621,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
   }
 }
 
-// Domains tab
+// Hosts tab
 
 class DomainsTab extends StatefulWidget {
   const DomainsTab({super.key});
@@ -1694,7 +1696,7 @@ class _DomainsTabState extends State<DomainsTab> {
     final confirmed = await showShadDialog<bool>(
       context: context,
       builder: (context) => ShadDialog(
-        title: const Text('Remove known host'),
+        title: const Text('Remove known host entry'),
         description: Text(
           'Remove the $keyType entry for "$host" from known_hosts?',
         ),
@@ -1727,72 +1729,6 @@ class _DomainsTabState extends State<DomainsTab> {
   Future<List<Map<String, String>>?> _scanAvailableHostKeys(String host) =>
       _controller.scanAvailableHostKeys(host);
 
-  Future<List<String>?> _selectKeysToAdd(String host, List<Map<String, String>> available) async {
-    final selected = List.generate(available.length, (i) => i).toSet();
-
-    final confirmed = await showShadDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setStateDialog) => ShadDialog(
-          title: Text('Add $host to known_hosts'),
-          description: const Text(
-            'Select the key algorithms to add. All are selected by default.',
-          ),
-          actions: [
-            Semantics(
-              button: true,
-              label: 'Cancel add keys',
-              child: ShadButton.outline(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel'),
-              ),
-            ),
-            Semantics(
-              button: true,
-              label: 'Add selected keys',
-              child: ShadButton(
-                onPressed: selected.isEmpty
-                    ? null
-                    : () => Navigator.of(context).pop(true),
-                child: const Text('Add'),
-              ),
-            ),
-          ],
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              for (var i = 0; i < available.length; i++)
-                Row(
-                  children: [
-                    ShadCheckbox(
-                      value: selected.contains(i),
-                      onChanged: (value) {
-                        setStateDialog(() {
-                          if (value) {
-                            selected.add(i);
-                          } else {
-                            selected.remove(i);
-                          }
-                        });
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      available[i]['keyType']!,
-                      style: const TextStyle(fontFamily: 'monospace'),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (confirmed != true || selected.isEmpty) return null;
-    return selected.map((i) => available[i]['line']!).toList();
-  }
-
   Future<void> _addKnownHost() async {
     final host = _hostController.text.trim();
     if (host.isEmpty) return;
@@ -1803,102 +1739,39 @@ class _DomainsTabState extends State<DomainsTab> {
       return;
     }
 
+    // Phase 1: fetch what the host offers.
     final available = await _scanAvailableHostKeys(host);
     if (available == null) return;
 
     if (available.isEmpty) {
       if (!mounted) return;
-      ToastService.instance.showErrorMessage(
-          'Host "$host" already has all of these key types in known_hosts.');
+      // Not an error: the scan reached the host, it just had nothing new to
+      // write. Red "Error" toasts made this read like the scan failed.
+      ToastService.instance.showInfo(
+        'Host "$host" is reachable, but there is nothing to add: '
+        'every key it offers is already in known_hosts.',
+      );
       return;
     }
 
-    final chosenLines = await _selectKeysToAdd(host, available);
+    if (!mounted) return;
+    // Phase 2: decide which of the fetched keys go into known_hosts.
+    final chosenLines = await selectKeysToAdd(
+      context,
+      host: host,
+      available: available,
+    );
     if (chosenLines == null || chosenLines.isEmpty) return;
 
-    await _controller.addKnownHostKeys(host, chosenLines);
-    if (mounted) {
-      _hostController.clear();
-      ToastService.instance.showSuccess('Known host added.');
-    }
-  }
-
-Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
-    final host = entry['host']!;
-    final keyType = entry['keyType']!;
-    // Read the controller once per row instead of once per reference.
-    final status = _controller.hostStatus(host);
-    final isChecking = _controller.isChecking(host);
-    final isHostsLoading = _controller.isHostsLoading;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          const Icon(
-            LucideIcons.globe,
-            size: 14,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  host,
-                  style: theme.textTheme.small,
-                  softWrap: true,
-                ),
-                if (keyType.isNotEmpty)
-                  Text(
-                    keyType,
-                    style: theme.textTheme.muted,
-                  ),
-              ],
-            ),
-          ),
-          ActionRow(
-            actions: [
-              RowAction(
-                label: 'Check',
-                onPressed: isHostsLoading || isChecking
-                    ? null
-                    : () => _checkHost(host),
-                enabledTooltip: 'Scan host keys for $host',
-                disabledTooltip: isChecking
-                    ? 'Already checking $host'
-                    : 'Wait for the current operation to finish',
-              ),
-              RowAction(
-                label: 'Remove',
-                onPressed: isHostsLoading
-                    ? null
-                    : () => _removeKnownHost(host, keyType),
-                enabledTooltip: 'Remove $host from known_hosts',
-                disabledTooltip: 'Wait for the current operation to finish',
-              ),
-            ],
-          ),
-          const SizedBox(width: 6),
-          if (status != null)
-            // Not a button. It used to be wrapped in ShadButton.ghost with an
-            // empty onPressed, which put a dead control in the tab order and
-            // announced it as a button to screen readers. The status is read
-            // only; the tooltip below carries the detail instead.
-            ShadTooltip(
-              builder: (context) => Text(
-                status == 'Unreachable'
-                    ? 'No response from $host. Check the hostname and that'
-                        ' port 22 is reachable, then try again.'
-                    : status,
-              ),
-              child: Semantics(
-                label: 'Host status for $host: $status',
-                child: HostStatusBadge(status: status),
-              ),
-            ),
-        ],
-      ),
+    final written = await _controller.addKnownHostKeys(host, chosenLines);
+    // Only on success. A failed write is already reported by the controller;
+    // announcing success anyway told the user their keys were stored when they
+    // were not, and clearing the box threw away what they had typed so they
+    // would have to scan again.
+    if (!written || !mounted) return;
+    _hostController.clear();
+    ToastService.instance.showSuccess(
+      'Added ${plural(chosenLines.length, 'key')} for $host to known_hosts.',
     );
   }
 
@@ -2035,72 +1908,17 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
               ],
             ),
             description: Text(
-              '${plural(_controller.knownHosts.length, 'host')} in '
-              '${_shortPath(_controller.knownHostsPath)}',
+              '${plural(_controller.knownHosts.length, 'entry', 'entries')} '
+              'in ${_shortPath(_controller.knownHostsPath)}',
             ),
             child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-                  child: Builder(
-                    builder: (context) {
-                      // Was a ValueListenableBuilder over a ValueNotifier that
-                      // existed only to trigger a setState from an async gap.
-                      // The controller already rebuilds this whole subtree, so
-                      // reading the flag is enough.
-                      final adding = _controller.isScanning;
-                      return Row(
-                      children: [
-                        Expanded(
-                          child: ListenableBuilder(
-                            listenable: _hostController,
-                            builder: (context, _) => ShadInput(
-                              controller: _hostController,
-                              placeholder: const Text('example.com'),
-                              onSubmitted:
-                                  adding ? null : (_) => _addKnownHost(),
-                              enabled: !adding,
-                              trailing: _hostController.text.isNotEmpty && !adding
-                                  ? Semantics(
-                                      button: true,
-                                      label: 'Clear host input',
-                                      child: ShadButton.ghost(
-                                        size: ShadButtonSize.sm,
-                                        onPressed: () {
-                                          _hostController.clear();
-                                        },
-                                        child: const Icon(LucideIcons.x, size: 14),
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Semantics(
-                          button: true,
-                          label: 'Add Host to known_hosts',
-                          child: ShadButton(
-                            onPressed: adding || _controller.isHostsLoading
-                                ? null
-                                : _addKnownHost,
-                            leading: adding
-                                ? SizedBox.square(
-                                    dimension: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: ShadTheme.of(context).colorScheme.primaryForeground,
-                                    ),
-                                  )
-                                : null,
-                            child: const Text('Add'),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+                AddHostField(
+                  hostController: _hostController,
+                  isScanning: _controller.isScanning,
+                  isHostsLoading: _controller.isHostsLoading,
+                  onAdd: _addKnownHost,
                 ),
-              ),
               _controller.isHostsLoading
                     ? const Padding(
                         padding: EdgeInsets.all(12),
@@ -2129,7 +1947,19 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                                   key: ValueKey(
                                     '${entry['host']}|${entry['keyType']}',
                                   ),
-                                  child: _buildHostRow(entry, theme),
+                                  child: HostRow(
+                                    entry: entry,
+                                    status:
+                                        _controller.hostStatus(entry['host']!),
+                                    isChecking:
+                                        _controller.isChecking(entry['host']!),
+                                    isHostsLoading: _controller.isHostsLoading,
+                                    onCheck: () => _checkHost(entry['host']!),
+                                    onRemove: () => _removeKnownHost(
+                                      entry['host']!,
+                                      entry['keyType']!,
+                                    ),
+                                  ),
                                 ),
                             ],
                           ),

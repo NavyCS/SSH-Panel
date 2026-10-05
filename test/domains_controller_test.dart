@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ssh_panel/features/domains/domains_controller.dart';
+import 'package:ssh_panel/services/ssh_domains.dart';
 
 void main() {
   group('DomainsController.parseKeyLine', () {
@@ -60,6 +61,42 @@ void main() {
         ),
         isNull,
       );
+    });
+  });
+
+  group('DomainsController.addKnownHostKeys reports whether it worked', () {
+    // The controller swallows a failed write after showing an error toast, so
+    // the caller cannot tell success from failure unless it is told. It used to
+    // return nothing, and the caller announced success unconditionally: the
+    // user was told their keys were stored when they were not, and the host
+    // they had typed was cleared so they had to scan again.
+    late DomainsController controller;
+
+    setUp(() {
+      controller = DomainsController(
+        configManager: _FakeConfigManager(shouldFail: true),
+      );
+    });
+
+    tearDown(() => controller.dispose());
+
+    test('returns false when the write throws', () async {
+      final written = await controller.addKnownHostKeys('example.com', [
+        'example.com ssh-ed25519 AAAAC3',
+      ]);
+      expect(written, isFalse);
+    });
+
+    test('returns false for a non-SshConfigException too', () async {
+      // The generic catch, not just the expected one: a bad surprise must not
+      // read as success either.
+      controller = DomainsController(
+        configManager: _FakeConfigManager(throwGeneric: true),
+      );
+      final written = await controller.addKnownHostKeys('example.com', [
+        'example.com ssh-ed25519 AAAAC3',
+      ]);
+      expect(written, isFalse);
     });
   });
 
@@ -155,4 +192,35 @@ void main() {
       expect(DomainsController().dispose, returnsNormally);
     });
   });
+}
+
+/// Stands in for [SshConfigManager] with a write that fails.
+///
+/// Only the one method the controller calls on this path is overridden. The
+/// controller takes its manager by constructor argument precisely so this can
+/// be tested, and overriding beats redirecting `USERPROFILE` at the real
+/// `~/.ssh/known_hosts`.
+class _FakeConfigManager implements SshConfigManager {
+  _FakeConfigManager({this.shouldFail = false, this.throwGeneric = false});
+
+  /// Throw the expected [SshConfigException].
+  final bool shouldFail;
+
+  /// Throw something the controller does not specifically expect.
+  final bool throwGeneric;
+
+  @override
+  Future<void> writeKnownHostKeys(String host, List<String> keyLines) async {
+    if (throwGeneric) throw const FormatException('unexpected');
+    if (shouldFail) {
+      throw SshConfigException(
+        SshConfigErrorCode.writeFailed,
+        'Failed to write ~/.ssh/known_hosts.',
+      );
+    }
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName} is not used here');
 }

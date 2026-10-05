@@ -239,10 +239,25 @@ class DomainsController extends ChangeNotifier {
     _notify();
   }
 
-  /// Leaves edit mode, discarding the buffered text.
-  void cancelEditing() {
+  /// Leaves edit mode and returns the on-disk contents of the config file.
+  ///
+  /// Cancel means "discard my edits and go back to what is actually on disk",
+  /// so this re-reads the file rather than handing back the cached
+  /// [_configText]: the file may have been changed by something else since the
+  /// last refresh, and restoring a stale copy would silently discard that.
+  ///
+  /// Returns the refreshed text. If the read fails the cached value is
+  /// returned unchanged, so the editor is never left blank.
+  String cancelEditing() {
     _isEditing = false;
+    try {
+      _configText = _configManager.readConfig();
+    } on SshConfigException {
+      // Keep the previous value; surfacing a toast here would double up with
+      // whatever the user does next.
+    }
     _notify();
+    return _configText;
   }
 
   // -----------------------------------------------------------------------

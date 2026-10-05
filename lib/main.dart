@@ -2026,12 +2026,10 @@ Widget _buildHostRow(Map<String, String> entry, ShadThemeData theme) {
                           onPressed: _controller.isLoading
                               ? null
                               : () {
-                                  // Discard edits by re-reading the value the
-                                  // controller still holds, which is the
-                                  // last one read from disk.
+                                  // Discard edits by restoring what is actually
+                                  // on disk right now, not a cached copy.
                                   _configController.text =
-                                      _controller.configText;
-                                  _controller.cancelEditing();
+                                      _controller.cancelEditing();
                                 },
                           child: const Text('Cancel'),
                         ),

@@ -127,6 +127,20 @@ void main() {
       expect(controller.isEditing, isFalse);
     });
 
+    test('cancelEditing leaves edit mode and reports the on-disk text', () {
+      // Cancel must restore what is on disk, not a cached copy: something
+      // else may have rewritten the file since the last refresh.
+      final controller = DomainsController();
+      addTearDown(controller.dispose);
+
+      controller.beginEditing();
+      final restored = controller.cancelEditing();
+
+      expect(controller.isEditing, isFalse);
+      expect(restored, isA<String>());
+      expect(restored, controller.configText);
+    });
+
     test('shortPath leaves paths outside ~/.ssh untouched', () {
       // Only paths under the ssh directory are abbreviated; shortening any
       // other path would misrepresent it.

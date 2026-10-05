@@ -1118,6 +1118,11 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
     final canUnload = !_controller.isLoading && _controller.agentRunning && isLoaded;
     final hasPub = _controller.hasPublicKey(path);
 
+    // Progress belongs on the row being acted on. The tab no longer blanks
+    // itself for a single-key action, so the row has to say so itself -- and
+    // the other rows stay readable and still show their state.
+    final isBusy = _controller.isBusyWith(path);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -1143,6 +1148,15 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               ],
             ),
           ),
+          if (isBusy)
+            const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
           ActionRow(
             // Gaps between View|Load|Unload|Delete were 0 and 4 in the original
             // hand-written tree; a uniform 4 keeps the cluster legible without
@@ -1364,7 +1378,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
               ],
             ),
             description: Text('${_controller.keyFiles.length} file(s) in ~/.ssh'),
-            child: _controller.isLoading
+            child: _controller.isInitialLoad
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
@@ -1415,7 +1429,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
           ShadCard(
             title: const Text('Loaded Keys'),
             description: Text('${_controller.loadedKeys.length} key(s) in agent'),
-            child: _controller.isLoading
+            child: _controller.isInitialLoad
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(
@@ -1508,7 +1522,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
             description: Text(
               '${_controller.authorizedKeys.length} authorized key(s) in ~/.ssh/authorized_keys',
             ),
-            child: _controller.isLoading
+            child: _controller.isInitialLoad
                 ? const Padding(
                     padding: EdgeInsets.all(12),
                     child: SizedBox(

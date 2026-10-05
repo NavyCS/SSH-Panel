@@ -57,6 +57,19 @@ class KeysController extends ChangeNotifier {
   int _refreshGeneration = 0;
   bool _disposed = false;
 
+  /// True once a refresh has completed at least once, whatever the outcome.
+  ///
+  /// This is what separates "the tab has nothing to show yet" from "an action
+  /// is running over data we already have". A single isLoading flag drove both,
+  /// so unloading a single key replaced all three cards with a spinner and the
+  /// rest of the tab disappeared for the duration.
+  bool _hasLoadedOnce = false;
+
+  /// The key file an operation is currently running against, if any.
+  ///
+  /// Used to show progress on the affected row instead of over the whole tab.
+  String? _busyKeyPath;
+
   /// Paths of the private keys found in `~/.ssh`.
   List<String> get keyFiles => _keyFiles;
 
@@ -68,7 +81,21 @@ class KeysController extends ChangeNotifier {
   /// Whether the agent is running, which gates Load and Unload.
   bool get agentRunning => _agentRunning;
 
+  /// True while any operation is running.
+  ///
+  /// Use this to disable actions and prevent concurrent mutations of the agent.
+  /// Do **not** use it to hide content: see [isInitialLoad].
   bool get isLoading => _loading;
+
+  /// True only while there is nothing to display yet.
+  ///
+  /// This is the state that justifies replacing the tab's content with a
+  /// spinner. Once any data has arrived the cards stay on screen through every
+  /// later operation, so a single-key action no longer wipes the view.
+  bool get isInitialLoad => _loading && !_hasLoadedOnce;
+
+  /// The key file an operation is running against, for inline row progress.
+  bool isBusyWith(String path) => _busyKeyPath == path;
 
   /// `~/.ssh`, or empty when USERPROFILE is unset.
   String get sshDirectory => _keyManager.sshDirectory;
@@ -139,6 +166,9 @@ class KeysController extends ChangeNotifier {
       // Only the newest run may clear the spinner, or a superseded run would
       // leave it off while the newer one is still working.
       if (!_disposed && generation == _refreshGeneration) {
+        // Even a failed refresh means we have been asked and have answered, so
+        // later refreshes must not blank the tab again.
+        _hasLoadedOnce = true;
         _setLoading(false);
       }
     }
@@ -217,6 +247,7 @@ class KeysController extends ChangeNotifier {
   /// [passphrase] must already be collected by the caller: reading it needs a
   /// dialog, and a controller has no BuildContext to open one with.
   Future<void> loadKey(String path, String? passphrase) async {
+    _busyKeyPath = path;
     _setLoading(true);
     try {
       await _keyManager.addKey(path, passphrase: passphrase);
@@ -238,12 +269,14 @@ class KeysController extends ChangeNotifier {
       ToastService.instance.showError(
           e is Exception ? e : Exception(e.toString()));
     } finally {
+      _busyKeyPath = null;
       _setLoading(false);
     }
   }
 
   /// Unloads the key at [path] from the agent.
   Future<void> unloadKey(String path) async {
+    _busyKeyPath = path;
     _setLoading(true);
     try {
       await _keyManager.removeKey(path);
@@ -258,6 +291,7 @@ class KeysController extends ChangeNotifier {
       ToastService.instance.showError(
           e is Exception ? e : Exception(e.toString()));
     } finally {
+      _busyKeyPath = null;
       _setLoading(false);
     }
   }
@@ -403,6 +437,7 @@ class KeysController extends ChangeNotifier {
   /// which is what the tab did before -- refusing to delete would leave the
   /// user unable to remove a file the agent had wedged itself on.
   Future<void> deleteKeyFile(String path) async {
+    _busyKeyPath = path;
     _setLoading(true);
     try {
       if (isKeyLoaded(path)) {
@@ -424,6 +459,7 @@ class KeysController extends ChangeNotifier {
       ToastService.instance.showError(
           e is Exception ? e : Exception(e.toString()));
     } finally {
+      _busyKeyPath = null;
       _setLoading(false);
     }
   }

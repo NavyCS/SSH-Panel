@@ -183,8 +183,14 @@ class DomainsController extends ChangeNotifier {
     _notify();
     if (_disposed) return null;
 
+    // Compared through hostKeyOf, not as raw strings. known_hosts does not store
+    // what the user typed: `ssh-keyscan ::1` writes `[::1]:22`. A raw comparison
+    // silently found no existing entries for an IPv6 literal, so the app offered
+    // to re-add keys that were already there.
+    final hostKey = SshConfigManager.hostKeyOf(host);
     final existingKeyTypes = _knownHosts
-        .where((h) => h['host'] == host)
+        .where((h) =>
+            SshConfigManager.hostKeyOf(h['host'] ?? '') == hostKey)
         .map((h) => h['keyType']!)
         .toSet();
 

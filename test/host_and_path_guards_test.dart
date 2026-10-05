@@ -333,6 +333,57 @@ example.com:2222 ssh-ed25519 KEYOTHERHOSTPORT
     });
   });
 
+  group('known_hosts host matching, as the controller does it', () {
+    // The controller filters known_hosts by host to work out which key types are
+    // already recorded. It has to use the same normalisation as the rewrite
+    // path, or the two disagree about what "this host" is.
+    Set<String> existingTypesFor(
+      List<Map<String, String>> knownHosts,
+      String input,
+    ) {
+      final key = SshConfigManager.hostKeyOf(input);
+      return knownHosts
+          .where((h) => SshConfigManager.hostKeyOf(h['host'] ?? '') == key)
+          .map((h) => h['keyType']!)
+          .toSet();
+    }
+
+    test('finds existing key types for a bare IPv6 literal', () {
+      // The second occurrence of this bug, in the controller. Without the
+      // normalisation existingTypesFor returns empty, so the app offers to add
+      // keys the host already has.
+      final known = [
+        {'host': '[::1]:22', 'keyType': 'ssh-ed25519'},
+        {'host': '[::1]:22', 'keyType': 'ecdsa-sha2-nistp256'},
+      ];
+      expect(existingTypesFor(known, '::1'),
+          {'ssh-ed25519', 'ecdsa-sha2-nistp256'},
+          reason: 'the bracketed entry belongs to the host the user typed');
+      expect(existingTypesFor(known, '[::1]'),
+          {'ssh-ed25519', 'ecdsa-sha2-nistp256'});
+    });
+
+    test('finds existing key types for a host name with any port', () {
+      final known = [
+        {'host': 'example.com:2222', 'keyType': 'ssh-ed25519'},
+      ];
+      expect(existingTypesFor(known, 'example.com'), {'ssh-ed25519'});
+    });
+
+    test('does not confuse a different host', () {
+      final known = [
+        {'host': '[::1]:22', 'keyType': 'ssh-ed25519'},
+        {'host': 'other.example.com:22', 'keyType': 'ssh-rsa'},
+      ];
+      expect(existingTypesFor(known, '::2'), isEmpty);
+      expect(existingTypesFor(known, 'other.example.com'), {'ssh-rsa'});
+    });
+
+    test('tolerates a missing host field', () {
+      expect(existingTypesFor([{'keyType': 'ssh-ed25519'}], '::1'), isEmpty);
+    });
+  });
+
   group('FilePermissions', () {
     // These touch the real file system, so they work in a temp directory and
     // clean up after themselves rather than asserting on the user's ~/.ssh.

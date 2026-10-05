@@ -26,6 +26,10 @@ export 'services/agent_state.dart' show agentServiceState;
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await SettingsService.getElevationMode();
+  // Load the theme before the first frame. Reading it later in the app's
+  // initState would build once with ThemeMode.system and then repaint, which
+  // is a visible flash when the stored preference is light or dark.
+  await SettingsService.getThemeMode();
 
   // Global uncaught-error handler: route every unhandled Flutter/async
   // error to the toaster instead of the red debug screen. Never rethrows -
@@ -55,8 +59,55 @@ void main(List<String> args) async {
 ShadThemeData _themeFor(Brightness brightness) =>
     ShadThemeData(brightness: brightness);
 
-class SshPanelApp extends StatelessWidget {
+/// Maps a stored preference to the matching [ThemeMode].
+///
+/// [SettingsService.themeModeOptions] holds exactly the `ThemeMode` names, so
+/// the lookup cannot drift out of sync with the enum.
+ThemeMode _themeModeFor(String preference) =>
+    ThemeMode.values.firstWhere(
+      (mode) => mode.name == preference,
+      // Unreachable for values that came through setThemeMode, which rejects
+      // unknown input; the fallback keeps a hand-edited preferences file from
+      // throwing during startup.
+      orElse: () => ThemeMode.system,
+    );
+
+/// Stateful only so it can rebuild when the theme preference changes.
+class SshPanelApp extends StatefulWidget {
   const SshPanelApp({super.key});
+
+  @override
+  State<SshPanelApp> createState() => _SshPanelAppState();
+}
+
+class _SshPanelAppState extends State<SshPanelApp> {
+  ThemeMode _themeMode = ThemeMode.system;
+
+  @override
+  void initState() {
+    super.initState();
+    SettingsService.themeModeNotifier.addListener(_onThemeModeChanged);
+    _loadThemeMode();
+  }
+
+  @override
+  void dispose() {
+    SettingsService.themeModeNotifier.removeListener(_onThemeModeChanged);
+    super.dispose();
+  }
+
+  void _onThemeModeChanged() {
+    if (!mounted) return;
+    setState(() {
+      _themeMode = _themeModeFor(SettingsService.themeModeNotifier.value);
+    });
+  }
+
+  Future<void> _loadThemeMode() async {
+    final stored = await SettingsService.getThemeMode();
+    if (!mounted) return;
+    setState(() => _themeMode = _themeModeFor(stored));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -68,9 +119,7 @@ class SshPanelApp extends StatelessWidget {
       // always light.
       theme: _themeFor(Brightness.light),
       darkTheme: _themeFor(Brightness.dark),
-      // Follow the system, which is the Windows app theme setting. App-only
-      // would pin it to light; dark would ignore the user's choice.
-      themeMode: ThemeMode.system,
+      themeMode: _themeMode,
       home: const SshPanelShell(),
     );
   }
@@ -91,6 +140,11 @@ class _SshPanelShellState extends State<SshPanelShell> {
   late final ShadTabsController<String> _tabsController;
   String _elevationMode = SettingsService.modePerAction;
 
+  /// Mirrors [SettingsService.themeModeNotifier] so the settings dialog shows
+  /// the current value. Held here only for display: the theme itself is applied
+  /// by `SshPanelApp`, which owns the `ShadApp`.
+  String _themeModeName = SettingsService.themeSystem;
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +158,14 @@ class _SshPanelShellState extends State<SshPanelShell> {
       if (mounted) {
         ToastService.instance.setState(ShadToaster.of(context));
       }
+    });
+    SettingsService.themeModeNotifier.addListener(_onThemeModeChanged);
+  }
+
+  void _onThemeModeChanged() {
+    if (!mounted) return;
+    setState(() {
+      _themeModeName = SettingsService.themeModeNotifier.value;
     });
   }
 
@@ -128,7 +190,9 @@ class _SshPanelShellState extends State<SshPanelShell> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setStateDialog) => ShadDialog(
           title: const Text('Settings'),
-          description: const Text('Choose your elevation mode.'),
+          description: const Text(
+            'Administrator prompts and appearance.',
+          ),
           actions: [
             Semantics(
               button: true,
@@ -141,26 +205,35 @@ class _SshPanelShellState extends State<SshPanelShell> {
           ],
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const Text(
+                'Administrator prompts',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Controls when Windows asks for administrator permission.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 8),
               ShadSelect<String>(
                 initialValue: _elevationMode,
                 options: [
                   ShadOption<String>(
                     value: SettingsService.modePerAction,
-                    child: const Text('Per action'),
+                    child: const Text('Ask every time'),
                   ),
                   ShadOption<String>(
                     value: SettingsService.modeOnce,
-                    child: const Text('Once'),
+                    child: const Text('Ask once per session'),
                   ),
                 ],
-                selectedOptionBuilder: (context, value) {
-                  return Text(
-                    value == SettingsService.modePerAction
-                        ? 'Per action'
-                        : 'Once',
-                  );
-                },
+                selectedOptionBuilder: (context, value) => Text(
+                  value == SettingsService.modePerAction
+                      ? 'Ask every time'
+                      : 'Ask once per session',
+                ),
                 onChanged: (value) async {
                   if (value != null) {
                     await SettingsService.setElevationMode(value);
@@ -169,6 +242,49 @@ class _SshPanelShellState extends State<SshPanelShell> {
                     }
                     setStateDialog(() {});
                   }
+                },
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'Theme',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Automatic follows the light or dark setting in Windows.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              ShadSelect<String>(
+                initialValue: _themeModeName,
+                options: const [
+                  ShadOption<String>(
+                    value: SettingsService.themeSystem,
+                    child: Text('Automatic'),
+                  ),
+                  ShadOption<String>(
+                    value: SettingsService.themeLight,
+                    child: Text('Light'),
+                  ),
+                  ShadOption<String>(
+                    value: SettingsService.themeDark,
+                    child: Text('Dark'),
+                  ),
+                ],
+                selectedOptionBuilder: (context, value) => Text(
+                  switch (value) {
+                    SettingsService.themeLight => 'Light',
+                    SettingsService.themeDark => 'Dark',
+                    _ => 'Automatic',
+                  },
+                ),
+                onChanged: (value) async {
+                  if (value == null) return;
+                  await SettingsService.setThemeMode(value);
+                  // No local setState: SshPanelApp listens to
+                  // themeModeNotifier and rebuilds itself, which also swaps the
+                  // theme this dialog is rendered in.
+                  setStateDialog(() {});
                 },
               ),
             ],
@@ -183,6 +299,7 @@ class _SshPanelShellState extends State<SshPanelShell> {
   @override
   void dispose() {
     SettingsService.elevationModeNotifier.removeListener(_onElevationModeChanged);
+    SettingsService.themeModeNotifier.removeListener(_onThemeModeChanged);
     _tabsController.dispose();
     super.dispose();
   }

@@ -11,17 +11,37 @@ import 'package:win32/win32.dart';
 /// Uses [shared_preferences] to store the user's preferred elevation mode:
 /// - 'per_action': UAC prompt on every admin action (default)
 /// - 'once': Single UAC prompt, the app stays elevated for the session
+///
+/// Also stores the preferred theme:
+/// - 'system': follow the Windows app theme setting (default)
+/// - 'light': always light
+/// - 'dark': always dark
 class SettingsService {
   static const String _keyElevationMode = 'elevation_mode';
+  static const String _keyThemeMode = 'theme_mode';
 
   static const String modePerAction = 'per_action';
   static const String modeOnce = 'once';
+
+  /// Theme preference values. These are the Flutter [ThemeMode] names, so
+  /// mapping a stored string to a theme is a lookup by name rather than a
+  /// hand-maintained switch that could drift.
+  static const String themeSystem = 'system';
+  static const String themeLight = 'light';
+  static const String themeDark = 'dark';
+
+  /// Every valid [themeMode] value, in the order shown in the picker.
+  static const List<String> themeModeOptions = [themeSystem, themeLight, themeDark];
 
   SettingsService._();
 
   /// Reactive notifier for UI components listening to elevation mode changes.
   static final ValueNotifier<String> elevationModeNotifier =
       ValueNotifier<String>(modePerAction);
+
+  /// Reactive notifier for UI components listening to theme changes.
+  static final ValueNotifier<String> themeModeNotifier =
+      ValueNotifier<String>(themeSystem);
 
   static Future<String> getElevationMode() async {
     final prefs = await _getPrefs();
@@ -34,6 +54,26 @@ class SettingsService {
     final prefs = await _getPrefs();
     await prefs.setString(_keyElevationMode, mode);
     elevationModeNotifier.value = mode;
+  }
+
+  /// Reads the stored theme preference, defaulting to [themeSystem].
+  ///
+  /// A stored value that is no longer in [themeModeOptions] is treated as
+  /// [themeSystem] rather than passed through, so a downgrade or a hand-edited
+  /// preferences file cannot leave the app on an unresolvable theme.
+  static Future<String> getThemeMode() async {
+    final prefs = await _getPrefs();
+    final stored = prefs.getString(_keyThemeMode) ?? themeSystem;
+    final mode = themeModeOptions.contains(stored) ? stored : themeSystem;
+    themeModeNotifier.value = mode;
+    return mode;
+  }
+
+  static Future<void> setThemeMode(String mode) async {
+    if (!themeModeOptions.contains(mode)) return;
+    final prefs = await _getPrefs();
+    await prefs.setString(_keyThemeMode, mode);
+    themeModeNotifier.value = mode;
   }
 
   static bool? _cachedIsElevated;

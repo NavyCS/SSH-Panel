@@ -66,6 +66,15 @@ class AppCredit extends StatelessWidget {
   /// homepage. When the project lands the URL changes here and nowhere else.
   static const String githubUrl = 'https://github.com';
 
+  /// How the app version is shown in the credit: `v1.0`.
+  ///
+  /// Derived from `version:` in pubspec.yaml, which reads `1.0.0+1` — the
+  /// `+1` is the build number, which nobody wants to read in a title bar, and
+  /// the patch level is noise at this stage. A test reads pubspec and asserts
+  /// this matches its major.minor, so bumping one without the other fails the
+  /// suite instead of silently shipping a stale number.
+  static const String versionLabel = 'v1.0';
+
   /// The box's own inset, the one value here that is not a theme token.
   ///
   /// Small on purpose: `vertical` is what decides how much taller the title
@@ -98,7 +107,7 @@ class AppCredit extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(
-            'Made with ❤️ & 🤖 by navy_cs',
+            'Made with ❤️ & 🤖',
             textAlign: TextAlign.right,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
@@ -107,7 +116,32 @@ class AppCredit extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          const _GithubLink(),
+          // The attribution and the link share the second line, so the credit
+          // reads as one sentence: "by navy_cs (v1.0): github".
+          // Both halves shrink. A bare Text or a bare link in a Row with
+          // mainAxisSize.min gets unbounded width, so its ellipsis never
+          // engages and the row overflows the title bar: measured 228px at one
+          // width and 52px at another. Nested Flexibles are what let the
+          // attribution give ground instead of pushing the bar wider. The link
+          // stays clickable however far it is squeezed.
+          Flexible(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    'by navy_cs ($versionLabel): ',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.small.copyWith(
+                      color: theme.colorScheme.mutedForeground,
+                    ),
+                  ),
+                ),
+                Flexible(child: const _GithubLink()),
+              ],
+            ),
+          ),
         ],
       ),
     );

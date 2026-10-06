@@ -8,6 +8,8 @@
 /// reliably, so those are confirmed in the running app instead.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,8 +57,63 @@ void main() {
     testWidgets('renders both lines', (tester) async {
       await tester.pumpWidget(harness(const AppCredit()));
 
-      expect(find.text('Made with ❤️ & 🤖 by navy_cs'), findsOneWidget);
+      expect(find.text('Made with ❤️ & 🤖'), findsOneWidget);
+      expect(find.text('by navy_cs (${AppCredit.versionLabel}): '),
+          findsOneWidget);
       expect(find.text('github'), findsOneWidget);
+    });
+
+    testWidgets('the link sits on the same line as the attribution',
+        (tester) async {
+      await tester.pumpWidget(harness(const AppCredit()));
+
+      // "by navy_cs (v1.0): github" reads as one sentence, so the two halves
+      // have to share a baseline rather than stacking.
+      final attribution = tester.getRect(
+        find.text('by navy_cs (${AppCredit.versionLabel}): '),
+      );
+      final link = tester.getRect(find.text('github'));
+
+      expect(
+        link.left,
+        greaterThanOrEqualTo(attribution.right - 0.5),
+        reason: 'the link must follow the attribution, not overlap it',
+      );
+      expect(
+        link.center.dy,
+        closeTo(attribution.center.dy, 2.0),
+        reason: 'same line means a shared vertical centre',
+      );
+    });
+
+    test('the shown version matches the one in pubspec.yaml', () {
+      // One source of truth. pubspec says `version: 1.0.0+1`; the credit shows
+      // major.minor, dropping the build number and the patch level. Bumping the
+      // app version without updating the credit used to be a silent drift, and
+      // this fails instead.
+      final pubspec = File('pubspec.yaml');
+      expect(
+        pubspec.existsSync(),
+        isTrue,
+        reason: 'the test runs with the project root as its working directory',
+      );
+
+      final match = RegExp(r'^version:\s*(\S+)$', multiLine: true)
+          .firstMatch(pubspec.readAsStringSync());
+      expect(match, isNotNull, reason: 'pubspec must declare a version');
+
+      // `1.0.0+1` -> `1.0`: drop the build number, then keep major.minor.
+      final withoutBuild = match!.group(1)!.split('+').first;
+      final parts = withoutBuild.split('.');
+      expect(parts.length, greaterThanOrEqualTo(2));
+      final expected = 'v${parts[0]}.${parts[1]}';
+
+      expect(
+        AppCredit.versionLabel,
+        expected,
+        reason: 'pubspec declares $withoutBuild, so the credit should read '
+            '$expected. Update AppCredit.versionLabel when you bump the app.',
+      );
     });
 
     testWidgets('announces the link as a link, with a useful label',
@@ -111,7 +168,7 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(
-        tester.getSize(find.text('Made with ❤️ & 🤖 by navy_cs')).width,
+        tester.getSize(find.byType(AppCredit)).width,
         lessThanOrEqualTo(available),
         reason: 'the credit must lay out inside the space it was handed',
       );

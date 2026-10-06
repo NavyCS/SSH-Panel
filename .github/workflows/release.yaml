@@ -1,0 +1,50 @@
+name: Flutter Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Se ejecuta al subir un tag como v1.0.0
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Habilitar soporte para Windows (por precaución)
+        run: flutter config --enable-windows-desktop
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Compilar versión de Windows
+        run: flutter build windows --release
+
+      - name: Comprimir la aplicación en un archivo ZIP
+        run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath SSH-Panel-Release.zip
+
+      - name: Descargar e instalar Enigma Virtual Box
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe"
+          Start-Process -FilePath ".\enigmavb.exe" -ArgumentList "/VERYSILENT" -Wait
+
+      - name: Crear ejecutable portable (Un solo .exe)
+        shell: powershell
+        run: |
+          # Ejecuta Enigma por línea de comandos pasándole tu archivo .evb
+          & "C:\Program Files (x86)\Enigma Virtual Box\enigmavbconsole.exe" ssh_panel_portable.evb
+
+      - name: Crear GitHub Release y subir ZIP y Portable
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "SSH-Panel-Release.zip,SSH_Panel_Portable.exe"
+          token: ${{ secrets.GITHUB_TOKEN }}
+          generateReleaseNotes: true

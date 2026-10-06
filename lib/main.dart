@@ -20,8 +20,8 @@ import 'services/ssh_service.dart';
 import 'shared/dialogs/passphrase_dialog.dart';
 import 'shared/plural.dart';
 import 'shared/widgets/agent_status_badge.dart';
+import 'shared/widgets/title_bar.dart';
 import 'shared/widgets/action_row.dart';
-import 'shared/widgets/app_credit.dart';
 import 'shared/widgets/disabled_action_wrapper.dart';
 import 'toast_service.dart';
 
@@ -318,108 +318,17 @@ class _SshPanelShellState extends State<SshPanelShell> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = ShadTheme.of(context);
     final isAdminMode = _isElevated;
 
     return Column(
       children: [
         // ---- Title bar ----
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.card,
-            border: Border(
-              bottom: BorderSide(color: theme.colorScheme.border),
-            ),
-          ),
-          child: Row(
-            children: [
-              SvgPicture.asset(
-                'assets/logo.svg',
-                width: 40,
-                height: 40,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                'SSH Panel',
-                style: theme.textTheme.h3,
-              ),
-              // Everything that belongs at the right-hand end of the bar
-              // lives in one end-aligned row. Giving the credit an Expanded
-              // of its own here would have pinned the Settings button to
-              // wherever the credit's share started, and left a gap between
-              // the button and the credit: an Expanded box is exactly as wide
-              // as its share, not as wide as its contents.
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (isAdminMode) ...[
-                      Semantics(
-                        button: true,
-                        label: 'Admin Mode',
-                        child: const ShadButton.outline(
-                          size: ShadButtonSize.sm,
-                          onPressed: null,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(LucideIcons.shield, size: 13),
-                              SizedBox(width: 5),
-                              Text('Admin Mode'),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ] else if (_elevationMode == SettingsService.modeOnce) ...[
-                      ShadTooltip(
-                        builder: (context) => const Text('Restart the app with administrator rights'),
-                        child: Semantics(
-                          button: true,
-                          label: 'Restart in Admin Mode',
-                          child: ShadButton.outline(
-                            size: ShadButtonSize.sm,
-                            onPressed: () {
-                              SettingsService.restartElevated();
-                            },
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(LucideIcons.shield, size: 13),
-                                SizedBox(width: 5),
-                                Text('Restart in Admin Mode'),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    ShadTooltip(
-                      builder: (context) => const Text('Settings'),
-                      child: Semantics(
-                        button: true,
-                        label: 'Settings',
-                        child: ShadIconButton(
-                          icon: const Icon(LucideIcons.settings),
-                          iconSize: 18,
-                          onPressed: _showSettingsDialog,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Loose rather than Expanded: the credit is laid out at
-                    // its natural width and only gives ground when the window
-                    // cannot spare that much. The end alignment above is what
-                    // keeps it flush against the right edge.
-                    const Flexible(child: AppCredit()),
-                  ],
-                ),
-              ),
-            ],
-          ),
+        TitleBar(
+          isAdminMode: isAdminMode,
+          showRestartInAdminMode:
+              _elevationMode == SettingsService.modeOnce,
+          onSettingsPressed: _showSettingsDialog,
+          onRestartElevated: SettingsService.restartElevated,
         ),
 
         // ---- Tabs ----

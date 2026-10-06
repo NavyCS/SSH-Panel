@@ -5,7 +5,7 @@
 /// semantics of a disabled control.
 library;
 
-import 'dart:ui' show PointerDeviceKind, SemanticsFlag;
+import 'dart:ui' show PointerDeviceKind, SemanticsAction, SemanticsFlag;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -114,11 +114,11 @@ void main() {
       ));
 
       final node = tester.getSemantics(find.text('Load'));
-      // hasFlag is deprecated in favour of flagsCollection, whose Tristate type is
-// not exported for direct comparison from this package. The deprecated call is
-// kept deliberately: it asserts the semantics flag this wrapper exists to set.
-// ignore: deprecated_member_use
       expect(
+        // hasFlag is deprecated in favour of flagsCollection, whose Tristate
+        // type is not exported for direct comparison from this package. The
+        // deprecated call is kept deliberately: it asserts the flag this
+        // wrapper exists to set.
         // ignore: deprecated_member_use
         node.hasFlag(SemanticsFlag.isEnabled),
         isFalse,
@@ -139,7 +139,7 @@ void main() {
       ));
 
       final node = tester.getSemantics(find.text('Load'));
-      // ignore: deprecated_member_use
+      // ignore: deprecated_member_use -- same Tristate export reason as above
       expect(node.hasFlag(SemanticsFlag.isEnabled), isTrue);
       handle.dispose();
     });
@@ -195,6 +195,94 @@ void main() {
       // rebuilding and resetting every later row.
       expect(find.byKey(const ValueKey('View')), findsOneWidget);
       expect(find.byKey(const ValueKey('Load')), findsOneWidget);
+    });
+
+    testWidgets('announces an enabled action as a button with one clean name',
+        (tester) async {
+      // ShadButton's own semantics put `button` on a node that carries neither
+      // the label nor the tap action, so the role and the name never met.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(harness(const ActionRow(
+        actions: [
+          RowAction(
+            label: 'Load',
+            onPressed: _noop,
+            enabledTooltip: 'Load id_ed25519 into ssh-agent',
+          ),
+        ],
+      )));
+
+      final node = tester.getSemantics(find.bySemanticsLabel('Load'));
+      expect(node.label, 'Load',
+          reason: 'the visible text must be the accessible name, stated once; '
+              'a merged "Load Load" means the child Text was not excluded');
+      // ignore: deprecated_member_use -- same Tristate export reason as above
+      expect(node.hasFlag(SemanticsFlag.isButton), isTrue,
+          reason: 'a screen reader needs the button role on the named node');
+      // ignore: deprecated_member_use -- same Tristate export reason as above
+      expect(node.hasFlag(SemanticsFlag.isEnabled), isTrue);
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isTrue,
+          reason: 'excluding the child semantics must not cost the tap action');
+      handle.dispose();
+    });
+
+    testWidgets('a disabled action keeps its reason and its disabled flag',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(harness(const ActionRow(
+        actions: [
+          RowAction(
+            label: 'View',
+            onPressed: null,
+            enabledTooltip: 'View the public key',
+            disabledTooltip: 'Start the ssh-agent service first',
+          ),
+        ],
+      )));
+
+      final node = tester.getSemantics(
+          find.bySemanticsLabel(RegExp('Start the ssh-agent service first')));
+      expect(node.label, contains('Start the ssh-agent service first'),
+          reason: 'the reason for unavailability is the only place that '
+              'information exists');
+      // ignore: deprecated_member_use -- same Tristate export reason as above
+      expect(node.hasFlag(SemanticsFlag.isEnabled), isFalse,
+          reason: 'a disabled control must not announce itself as live');
+      // ignore: deprecated_member_use -- same Tristate export reason as above
+      expect(node.hasFlag(SemanticsFlag.isButton), isTrue);
+      expect(node.getSemanticsData().hasAction(SemanticsAction.tap), isFalse,
+          reason: 'a control that cannot be tapped must not offer a tap');
+      handle.dispose();
+    });
+
+    testWidgets('an icon action announces the same name as a plain one',
+        (tester) async {
+      final handle = tester.ensureSemantics();
+
+      Future<String> announce(IconData? icon) async {
+        await tester.pumpWidget(harness(ActionRow(
+          actions: [
+            RowAction(
+              label: 'Del',
+              onPressed: _noop,
+              enabledTooltip: 'Delete the key',
+              icon: icon,
+            ),
+          ],
+        )));
+
+        final node = tester.getSemantics(find.bySemanticsLabel('Del'));
+        // ignore: deprecated_member_use -- same Tristate export reason as above
+        expect(node.hasFlag(SemanticsFlag.isButton), isTrue);
+        return node.label;
+      }
+
+      final plain = await announce(null);
+      final withIcon = await announce(LucideIcons.trash);
+      expect(plain, 'Del');
+      expect(withIcon, plain,
+          reason: 'an icon must not change what the button is called');
+      handle.dispose();
     });
   });
 

@@ -19,6 +19,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' show log;
 import 'dart:io';
 
 import 'file_permissions.dart';
@@ -851,8 +852,10 @@ class SshKeyManager {
     try {
       final file = File(path);
       if (await file.exists()) await file.delete();
-    } catch (_) {
-      // Intentionally ignored -- see doc comment.
+    } catch (e, st) {
+      // Intentionally not rethrown -- see doc comment.
+      log('Could not delete $path during best-effort cleanup.',
+          name: 'ssh_panel', error: e, stackTrace: st);
     }
   }
 

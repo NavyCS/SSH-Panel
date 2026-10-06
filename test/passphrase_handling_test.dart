@@ -145,11 +145,13 @@ void main() {
     test('no ssh_panel_ work directory is left behind', () async {
       final before = _workDirectories().length;
 
-      try {
-        await SshKeyManager().addKey(keyPath, passphrase: 'wrong-on-purpose');
-      } catch (_) {
-        // expected
-      }
+      await expectLater(
+        SshKeyManager().addKey(keyPath, passphrase: 'wrong-on-purpose'),
+        throwsA(isA<SshKeyException>()),
+        reason: 'this test only means anything if the call actually fails: '
+            'the leftover-file assertion below is about cleanup after a '
+            'failure, and a silent catch would let it pass vacuously',
+      );
 
       expect(_workDirectories().length, before,
           reason: 'the decrypted key and the passphrase file must be removed');

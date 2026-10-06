@@ -18,6 +18,7 @@ import 'services/ssh_domains.dart';
 import 'services/ssh_keys.dart';
 import 'services/ssh_service.dart';
 import 'shared/dialogs/passphrase_dialog.dart';
+import 'shared/open_ssh_folder.dart';
 import 'shared/plural.dart';
 import 'shared/widgets/agent_status_badge.dart';
 import 'shared/widgets/title_bar.dart';
@@ -932,17 +933,6 @@ class _KeysTabState extends State<KeysTab> {
 
   String _shortPath(String path) => KeysController.shortPath(path);
 
-  void _openSshFolder() {
-    final dir = _controller.sshDirectory;
-    if (dir.isEmpty) return;
-    if (!PathGuard.isAllowed(dir)) {
-      ToastService.instance.showErrorMessage(
-          'Refusing to open a folder outside your user profile.');
-      return;
-    }
-    Process.run('explorer', [dir], runInShell: false);
-  }
-
   bool _isKeyLoaded(String path) => _controller.isKeyLoaded(path);
 
   Future<void> _addAuthorizedKeyDialog() async {
@@ -1303,7 +1293,7 @@ Widget _buildKeyFileRow(ShadThemeData theme, String path) {
                   label: 'Open SSH Folder',
                   child: ShadButton.ghost(
                     size: ShadButtonSize.sm,
-                    onPressed: _openSshFolder,
+                    onPressed: () => openSshFolder(_controller.sshDirectory),
                     child: const Icon(LucideIcons.folderOpen, size: 14),
                   ),
                 ),
@@ -1596,17 +1586,6 @@ class _DomainsTabState extends State<DomainsTab> {
 
   Future<void> _saveConfig() => _controller.saveConfig(_configController.text);
 
-  void _openSshFolder() {
-    final dir = _controller.sshDirectory;
-    if (dir.isEmpty) return;
-    if (!PathGuard.isAllowed(dir)) {
-      ToastService.instance.showErrorMessage(
-          'Refusing to open a folder outside your user profile.');
-      return;
-    }
-    Process.run('explorer', [dir], runInShell: false);
-  }
-
   void _openKnownHostsFile() {
     final path = _controller.knownHostsPath;
     if (path.isEmpty) return;
@@ -1737,7 +1716,7 @@ class _DomainsTabState extends State<DomainsTab> {
                   label: 'Open SSH Folder',
                   child: ShadButton.ghost(
                     size: ShadButtonSize.sm,
-                    onPressed: _openSshFolder,
+                    onPressed: () => openSshFolder(_controller.sshDirectory),
                     child: const Icon(LucideIcons.folderOpen, size: 14),
                   ),
                 ),

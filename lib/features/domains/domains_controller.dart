@@ -1,3 +1,5 @@
+import 'dart:developer' show log;
+
 import 'package:flutter/foundation.dart';
 
 import '../../services/ssh_domains.dart';
@@ -278,9 +280,11 @@ class DomainsController extends ChangeNotifier {
     _isEditing = false;
     try {
       _configText = _configManager.readConfig();
-    } on SshConfigException {
+    } on SshConfigException catch (e, st) {
       // Keep the previous value; surfacing a toast here would double up with
       // whatever the user does next.
+      log('Config re-read failed; keeping the cached text for the editor.',
+          name: 'ssh_panel', error: e, stackTrace: st);
     }
     _notify();
     return _configText;

@@ -1,3 +1,5 @@
+import 'dart:developer' show log;
+
 import 'package:flutter/foundation.dart';
 
 import '../../services/agent_state.dart';
@@ -144,9 +146,11 @@ class ServiceController extends ChangeNotifier {
       await refresh();
       if (_disposed) return;
       ToastService.instance.showSuccess('Service action completed.');
-    } on CancellationTokenCancelled {
+    } on CancellationTokenCancelled catch (e, st) {
       // The tab went away mid-poll. Not something the user caused or needs to
-      // be told about, so stay silent.
+      // be told about, so it is logged rather than surfaced as a toast.
+      log('Action abandoned: the tab went away mid-poll.',
+          name: 'ssh_panel', error: e, stackTrace: st);
     } on SshServiceException catch (e) {
       if (_disposed) return;
       ToastService.instance.showError(e);

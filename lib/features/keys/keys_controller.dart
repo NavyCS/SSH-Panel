@@ -207,25 +207,6 @@ class KeysController extends ChangeNotifier {
     }
   }
 
-  /// Unloads the key at [path] from the agent without deleting the file.
-  ///
-  /// Distinct from [deleteKeyFile], which also removes the file; the delete
-  /// flow needs to unload first and only then remove.
-  Future<void> removeKeyFromAgent(String path) async {
-    try {
-      await _keyManager.removeKey(path);
-      if (_disposed) return;
-      await refresh();
-    } on SshKeyException catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(e);
-    } catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(
-          e is Exception ? e : Exception(e.toString()));
-    }
-  }
-
   /// Whether the key at [path] is encrypted and therefore needs a passphrase.
   ///
   /// The caller uses this to decide whether to prompt before calling
@@ -385,13 +366,20 @@ class KeysController extends ChangeNotifier {
     );
   }
 
-  /// Appends [line] to `~/.ssh/authorized_keys`.
-  Future<void> addAuthorizedKey(String line) async {
+  /// Runs an `authorized_keys` mutation under the shared busy/toast contract.
+  ///
+  /// Adding and removing are the same sequence -- spin up, mutate, report,
+  /// refresh -- so they share one body instead of two copies that would drift
+  /// the first time one of them is fixed and the other is not.
+  Future<void> _mutateAuthorizedKeys(
+    String successMessage,
+    Future<void> Function() mutation,
+  ) async {
     _setLoading(true);
     try {
-      await _keyManager.addAuthorizedKey(line);
+      await mutation();
       if (_disposed) return;
-      ToastService.instance.showSuccess('Authorized key added.');
+      ToastService.instance.showSuccess(successMessage);
       await refresh();
     } on SshKeyException catch (e) {
       if (_disposed) return;
@@ -405,29 +393,18 @@ class KeysController extends ChangeNotifier {
     }
   }
 
+  /// Appends [line] to `~/.ssh/authorized_keys`.
+  Future<void> addAuthorizedKey(String line) => _mutateAuthorizedKeys(
+      'Authorized key added.', () => _keyManager.addAuthorizedKey(line));
+
   /// Removes the entry identified by [rawLine] from `~/.ssh/authorized_keys`.
   ///
   /// Takes the raw line rather than an [AuthorizedKey] because that is what the
   /// manager matches on: the parsed view drops the original spacing and comment,
   /// so it cannot be used to locate the entry again.
-  Future<void> removeAuthorizedKey(String rawLine) async {
-    _setLoading(true);
-    try {
-      await _keyManager.removeAuthorizedKey(rawLine);
-      if (_disposed) return;
-      ToastService.instance.showSuccess('Authorized key removed.');
-      await refresh();
-    } on SshKeyException catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(e);
-    } catch (e) {
-      if (_disposed) return;
-      ToastService.instance.showError(
-          e is Exception ? e : Exception(e.toString()));
-    } finally {
-      _setLoading(false);
-    }
-  }
+  Future<void> removeAuthorizedKey(String rawLine) => _mutateAuthorizedKeys(
+      'Authorized key removed.',
+      () => _keyManager.removeAuthorizedKey(rawLine));
 
   /// Deletes the private key at [path] and its `.pub`.
   ///

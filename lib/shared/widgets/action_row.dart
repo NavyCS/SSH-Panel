@@ -21,7 +21,11 @@ class RowAction {
   /// Invoked when the button is pressed. Ignored when [isEnabled] is false.
   final VoidCallback? onPressed;
 
-  /// Tooltip (and screen-reader label) while the action *is* available.
+  /// Tooltip while the action *is* available.
+  ///
+  /// Hover-only. Screen readers hear [label] while the action is available,
+  /// and this string once it is not, because that is when
+  /// [DisabledActionWrapper] turns it into the semantics label.
   final String enabledTooltip;
 
   /// Tooltip while the action is unavailable. Defaults to
@@ -110,22 +114,45 @@ class _ActionButton extends StatelessWidget {
     return DisabledActionWrapper(
       enabled: enabled,
       tooltip: action.tooltip,
-      child: ShadButton.ghost(
-        size: ShadButtonSize.sm,
-        onPressed: action.onPressed,
-        child: leading == null && icon == null
-            ? Text(action.label)
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (leading != null)
-                    leading
-                  else
-                    Icon(icon, size: 14),
-                  const SizedBox(width: 6),
-                  Text(action.label),
-                ],
-              ),
+      // ShadButton builds its own semantics boundary that carries `button` and
+      // `enabled` but neither the label nor the tap action, which sit on a
+      // descendant node instead. The result was a button role with no name
+      // and a name with no role, split across two nodes, while the wrapper's
+      // disabled label stopped one level too high to reach either.
+      //
+      // Declaring the node here, excluding the subtree's semantics, puts role,
+      // name and the wrapper's `enabled: false` on one node. `excludeSemantics`
+      // also drops the `Text` that would otherwise supply the name, so the name
+      // is stated explicitly -- and stated once: measured in this project, a
+      // `label` declared above a subtree that still has its own label is
+      // announced as `"$label $child"` (a plain `Semantics(label: 'X', child:
+      // Text('X'))` reads "X\nX"), which is where a "Load Load" button would
+      // come from.
+      child: Semantics(
+        button: true,
+        label: action.label,
+        excludeSemantics: true,
+        // Null while disabled: the wrapper supplies `enabled: false` and
+        // IgnorePointer blocks the pointer, so offering a tap to a screen
+        // reader would announce a control that cannot be operated.
+        onTap: action.onPressed,
+        child: ShadButton.ghost(
+          size: ShadButtonSize.sm,
+          onPressed: action.onPressed,
+          child: leading == null && icon == null
+              ? Text(action.label)
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (leading != null)
+                      leading
+                    else
+                      Icon(icon, size: 14),
+                    const SizedBox(width: 6),
+                    Text(action.label),
+                  ],
+                ),
+        ),
       ),
     );
   }

@@ -1,3 +1,5 @@
+import 'dart:developer' show log;
+
 import 'package:flutter/widgets.dart';
 import 'package:shadcn_ui/shadcn_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -197,9 +199,11 @@ class _GithubLinkState extends State<_GithubLink> {
         Uri.parse(AppCredit.githubUrl),
         mode: LaunchMode.externalApplication,
       );
-    } catch (_) {
+    } catch (e, st) {
       // A missing or broken browser handler lands here; fall through to the
       // message below rather than leaving the click looking like a no-op.
+      log('Could not launch ${AppCredit.githubUrl}.',
+          name: 'ssh_panel', error: e, stackTrace: st);
     }
     if (!opened && mounted) {
       ToastService.instance

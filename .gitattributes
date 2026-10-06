@@ -1,0 +1,32 @@
+# Normalizar finales de linea.
+#
+# Motivo: sin esto, core.autocrlf=true en Windows hace que git avise en cada
+# commit de que "LF will be replaced by CRLF" y deja el estado real del
+# working tree sin definir. Guardamos LF en el repositorio y sacamos LF al
+# clonar, en cualquier plataforma, menos donde el formato exige CRLF.
+#
+# `text=auto` deja que git detecte binarios; `eol=lf` fija la salida en LF.
+* text=auto eol=lf
+
+# Scripts de Windows. Un .bat con LF funciona en la practica, pero no es lo
+# que espera cmd.exe y falla de forma confusa en scripts largos o con labels.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Firmas de linea: nunca se tocan.
+*.rc text eol=crlf
+*.manifest text eol=crlf
+*.appxmanifest text eol=crlf
+
+# Binarios: git no debe intentar normalizar estos ficheros.
+*.ico binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.pfx binary
+*.p12 binary
+*.exe binary
+*.dll binary
+*.msix binary
+*.symbols binary

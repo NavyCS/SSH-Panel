@@ -44,17 +44,37 @@ Microsoft.winappcli`
 ```
 SSHPanel/
 ├── lib/
-│   ├── main.dart              # shadcn_ui UI shell (Service / Keys / Domains tabs)
-│   └── services/
-│       ├── ssh_service.dart   # SshServiceManager — win32 SCM FFI
-│       ├── ssh_check.dart     # OpenSSH presence detection
-│       ├── ssh_keys.dart      # SshKeyManager — ssh-keygen / ssh-add
-│       └── ssh_domains.dart   # SshConfigManager — ~/.ssh/config + known_hosts
+│   ├── main.dart                 # shadcn_ui UI shell (~1900 lines): Service / Keys / Domains tabs
+│   ├── toast_service.dart        # centralized toasts + global error reporting
+│   ├── services/
+│   │   ├── ssh_service.dart      # SshServiceManager — win32 SCM FFI
+│   │   ├── ssh_keys.dart         # SshKeyManager — ssh-keygen / ssh-add
+│   │   ├── ssh_domains.dart      # SshConfigManager — ~/.ssh/config + known_hosts
+│   │   ├── ssh_check.dart        # OpenSSH presence detection
+│   │   ├── path_guard.dart       # confines paths before handing them to external programs
+│   │   ├── file_permissions.dart # ACL hardening for directories the app creates
+│   │   ├── agent_state.dart      # shared notifier for the agent service state
+│   │   ├── settings_service.dart # settings persistence + process-elevation helpers
+│   │   └── cancellation.dart     # cooperative cancellation for polling loops
+│   ├── features/
+│   │   ├── service/              # service_controller.dart
+│   │   ├── keys/                 # keys_controller.dart
+│   │   └── domains/              # domains_controller.dart, host_row.dart,
+│   │                             # add_host_field.dart, select_keys_dialog.dart
+│   └── shared/
+│       ├── widgets/              # action_row.dart, disabled_action_wrapper.dart,
+│       │                         # app_credit.dart, agent_status_badge.dart,
+│       │                         # host_status_badge.dart, title_bar.dart
+│       ├── dialogs/
+│       │   └── passphrase_dialog.dart
+│       ├── plural.dart           # count with a correctly pluralised noun
+│       └── open_ssh_folder.dart  # guarded "open ~/.ssh in Explorer"
 ├── windows/runner/app.manifest   # asInvoker with on-demand ShellExecute("runas") elevation
 ├── Package.appxmanifest          # allowElevation + runFullTrust
 ├── winapp.yaml
-├── dist/                         # built MSIX
-└── build/windows/x64/runner/Release/
+└── (build output — gitignored, not in the repo)
+    ├── dist/                     # built MSIX
+    └── build/windows/x64/runner/Release/   # loose-layout flutter build
 ```
 
 ## Build & package
@@ -81,7 +101,7 @@ winapp init .
 winapp cert generate
 
 # 6. Generate Icon
-flutter pub run flutter_launcher_icons
+dart run flutter_launcher_icons
 
 # 7. Build the Windows release
 flutter build windows --release
@@ -95,9 +115,13 @@ winapp package build/windows/x64/runner/Release `
 
 # 9. Install the certificate in the machine root store (requires elevation)
 #    winapp cert install alone fails with access denied.
-powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy Bypass','-File','install-cert.ps1' -Verb RunAs -Wait"
+#    There is no install-cert.ps1 in the repo — save the block below as
+#    install-cert.ps1 in the repo root, then run the command below from there.
+#    ("password" is the default password `winapp cert generate` writes into
+#    devcert.pfx — see `winapp cert generate --help`. If you passed --password,
+#    use that same value below.)
 # install-cert.ps1:
-#   $pfx="D:\Proyectos\SSHPanel\devcert.pfx"
+#   $pfx=Join-Path $PSScriptRoot "devcert.pfx"   # the repo root, wherever you cloned it
 #   $pwd=ConvertTo-SecureString "password" -AsPlainText -Force
 #   $cert=New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($pfx,$pwd)
 #   $store=New-Object System.Security.Cryptography.X509Certificates.X509Store(
@@ -105,6 +129,7 @@ powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-Execu
 #       [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine)
 #   $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
 #   $store.Add($cert); $store.Close()
+powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy Bypass','-File','install-cert.ps1' -Verb RunAs -Wait"
 
 # 10. Install and run the MSIX
 Add-AppxPackage -Path dist/ssh_panel.msix
@@ -127,9 +152,14 @@ winapp run build/windows/x64/runner/Release
   (`.../foundation/windows10/restrictedcapabilities`), _not_ `desktop6`.
 - `winapp pack <output>` is invalid — `pack` aliases `package`, which takes an
   **input folder**.
-- Key generation uses `ssh-keygen -P` (never `-N`, which errors on Windows) and
-  passes the passphrase as a discrete argv argument (stdin hangs on Windows
-  without a TTY).
+- Loading a passphrase-protected key keeps the passphrase off the command line:
+  it reaches `ssh-keygen` through an `SSH_ASKPASS` helper (a `.cmd` that prints
+  a sibling passphrase file) with `SSH_ASKPASS_REQUIRE=force` and `DISPLAY` set,
+  so the value never lands in the process table, where any process on the
+  machine can read a command-line argument. Stdin is not an alternative either —
+  `ssh-keygen` on Windows blocks forever without a TTY.
+- Key generation uses `ssh-keygen -P` (not `-N`, which Win32-OpenSSH's
+  `ssh-keygen` ignores).
 - `flutter doctor` may warn the Visual Studio install is incomplete even though
   MSBuild, `cl.exe`, `link.exe` and the Windows 10 SDK are all present and the
   build succeeds.
@@ -154,3 +184,10 @@ dart pub global activate loam
 ```powershell
 loam scan --format json > loam-report.json
 ```
+
+Inline `// loam-ignore:` directives do **not** suppress `slop-empty-catch`
+findings in loam 0.1.15: three separate placements were measured against a
+positive control in `unused-public-exports`, where the same directive does
+suppress correctly. This is a limitation of the tool rather than project
+policy — on `slop-empty-catch` the directive currently has no effect, so the
+finding will stay in the report until loam fixes it.

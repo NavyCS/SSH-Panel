@@ -151,8 +151,8 @@ void main() {
     });
 
     test('refuses a sibling directory sharing the prefix', () {
-      // The classic prefix bug: C:\Users\navyc-evil must not pass because it
-      // starts with C:\Users\navyc.
+      // The classic prefix bug: C:\Users\alice-evil must not pass because it
+      // starts with C:\Users\alice.
       if (!hasProfile) return;
       expect(PathGuard.isInsideUserProfile('$profile-evil\\secrets'), isFalse);
       expect(PathGuard.isInsideUserProfile('$profile.bak\\keys'), isFalse);

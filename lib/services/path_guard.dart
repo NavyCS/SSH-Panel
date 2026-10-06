@@ -23,8 +23,8 @@ class PathGuard {
   /// with it, which is the fail-closed answer: refuse rather than guess.
   ///
   /// Comparison is case-insensitive because Windows paths are, and the prefix
-  /// check appends a separator so `C:\Users\navyc-evil` cannot pass by
-  /// starting with `C:\Users\navyc`.
+  /// check appends a separator so `C:\Users\alice-evil` cannot pass by
+  /// starting with `C:\Users\alice`.
   static bool isInsideUserProfile(String path) {
     final profile = Platform.environment['USERPROFILE'];
     if (profile == null || profile.isEmpty) return false;
@@ -41,7 +41,7 @@ class PathGuard {
     if (normalisedPath.length == normalisedProfile.length) return true;
 
     // Require a separator so a sibling directory sharing the prefix is
-    // rejected: C:\Users\navyc-evil must not pass as C:\Users\navyc.
+    // rejected: C:\Users\alice-evil must not pass as C:\Users\alice.
     final next = normalisedPath[normalisedProfile.length];
     return next == r'\' || next == '/';
   }

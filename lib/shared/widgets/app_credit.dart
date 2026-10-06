@@ -77,18 +77,29 @@ class AppCredit extends StatelessWidget {
 
   /// The box's own inset, the one value here that is not a theme token.
   ///
-  /// Small on purpose: `vertical` is what decides how much taller the title
-  /// bar gets, so it stays at the amount needed to keep the link's focus ring
-  /// from sitting on the outer border (4px + the border below), while
-  /// `horizontal` gives the text the same breathing room an outline button
-  /// has.
+  /// Sized so a single-line credit comes out exactly as tall as the Settings
+  /// button beside it: 14px of text + 4px between the lines + a 16px link + this
+  /// 4px + 2px of border = 40px, which is what `ShadIconButton` resolves to at
+  /// its default size. `vertical` used to be 8px, which made the box 48px tall
+  /// and 8px proud of the button it sits next to.
+  ///
+  /// It cannot go lower than 2px without the link's focus ring landing on the
+  /// outer border, so the rest of the saving came out of the link's own padding
+  /// instead, which keeps a 16px click target rather than a 12px one.
   ///
   /// Public because the height budget it produces is asserted in the tests:
   /// content + [vertical] (already top + bottom) + 2 for the border.
   static const EdgeInsets boxPadding = EdgeInsets.symmetric(
     horizontal: 8,
-    vertical: 4,
+    vertical: 2,
   );
+
+  /// Vertical space between the attribution and the link below it.
+  ///
+  /// Public because the height budget is asserted in the tests, and a bare
+  /// number in a test is exactly the kind of constant that goes stale the next
+  /// time the box is resized.
+  static const double lineGap = 2;
 
   @override
   Widget build(BuildContext context) {
@@ -115,7 +126,11 @@ class AppCredit extends StatelessWidget {
               color: theme.colorScheme.mutedForeground,
             ),
           ),
-          const SizedBox(height: 4),
+          // 2px, not 4. Together with the box padding and the link padding this is what
+          // makes the credit exactly as tall as the Settings button beside it.
+          // The text style has a height factor of 1.0, so 14px of text is 14px of
+          // line box and 2px still reads as two lines rather than one block.
+          const SizedBox(height: lineGap),
           // The attribution and the link share the second line, so the credit
           // reads as one sentence: "by navy_cs (v1.0): github".
           // Both halves shrink. A bare Text or a bare link in a Row with
@@ -225,7 +240,11 @@ class _GithubLinkState extends State<_GithubLink> {
           child: Container(
             // Padding and border are always laid out, with the border painted
             // only on focus, so focusing the link cannot nudge its neighbours.
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            // Vertical is 1, not 2: the credit has to match the Settings button's
+            // height exactly, and this is where the remaining 2px came from
+            // rather than from squeezing the box's own padding down to nothing.
+            // It still leaves a 16px tall click target.
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
             decoration: BoxDecoration(
               border: Border.all(
                 color: _focused

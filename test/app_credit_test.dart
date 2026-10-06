@@ -233,11 +233,16 @@ void main() {
       await tester.pumpWidget(_titleBar(700));
 
       expect(tester.takeException(), isNull);
-      // 38px of content (line + gap + link box) + padding (vertical already
-      // counts top and bottom) + 2px of border.
+      // Content, from the constants the widget exposes: 14px of line, the gap,
+      // and the link's own box (14px of text + 1px of padding above and below +
+      // a 1px border above and below = 18). Then the container's padding, whose
+      // `vertical` already counts top and bottom, plus 2px of border. This adds
+      // up to 40px, which is the Settings button's height -- see the
+      // `TitleBar lines the credit up with the Settings button` group.
+      const linkBox = 14 + 2 * 1 + 2 * 1;
       expect(
         tester.getSize(find.byType(AppCredit)).height,
-        38 + AppCredit.boxPadding.vertical + 2,
+        14 + AppCredit.lineGap + linkBox + AppCredit.boxPadding.vertical + 2,
         reason: 'the container may cost its own padding, nothing more; '
             'otherwise the title bar grows with it',
       );

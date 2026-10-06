@@ -96,6 +96,76 @@ void main() {
     });
   });
 
+  group('TitleBar lines the credit up with the Settings button', () {
+    // The credit is a bordered box next to an icon button, so a height
+    // difference between them reads as the box not belonging there. It was 8px
+    // taller, which is enough to notice. The two heights are pinned separately
+    // as well as against each other: a fix that matched them by growing the
+    // button would be a different design decision, and this says so.
+    testWidgets('the credit is exactly as tall as the Settings button',
+        (t) async {
+      await pumpBar(t, 1240, showRestart: true);
+
+      final credit = t.getRect(find.byType(AppCredit));
+      final settings = t.getRect(find.byType(ShadIconButton));
+
+      expect(
+        credit.height,
+        closeTo(settings.height, 0.5),
+        reason: 'a bordered box beside a button should not be a different '
+            'height; credit=${credit.height} settings=${settings.height}',
+      );
+    });
+
+    testWidgets('and the height is 40, not whatever the button happens to be',
+        (t) async {
+      // Guards against the two drifting together on a theme change that grows
+      // the button but not the credit, which would again leave a step.
+      await pumpBar(t, 1240, showRestart: true);
+
+      expect(t.getRect(find.byType(AppCredit)).height, closeTo(40, 0.5));
+      expect(t.getRect(find.byType(ShadIconButton)).height, closeTo(40, 0.5));
+    });
+
+    testWidgets('the link keeps a clickable target', (t) async {
+      // The height came out of padding, so the target has to be checked rather
+      // than assumed. Measured on the GestureDetector, which is the tappable
+      // area -- the Text inside it is only 14px and always was, so asserting on
+      // the text would have been asserting the wrong thing.
+      await pumpBar(t, 1240, showRestart: true);
+
+      final target = t.getRect(
+        find
+            .ancestor(
+              of: find.text('github'),
+              matching: find.byType(GestureDetector),
+            )
+            .first,
+      );
+
+      expect(
+        target.height,
+        greaterThanOrEqualTo(16),
+        reason: 'shrinking the box must not shrink the link into a sliver; '
+            'target is ${target.height}px tall',
+      );
+    });
+
+    testWidgets('the credit may still grow when the text wraps', (t) async {
+      // Matching the button cannot mean clipping: when the attribution wraps to
+      // two lines the box has to get taller, because there is no other honest
+      // option. Narrow enough to force the wrap.
+      await pumpBar(t, 640, showRestart: true);
+
+      expect(t.takeException(), isNull);
+      expect(
+        t.getRect(find.byType(AppCredit)).height,
+        greaterThan(40),
+        reason: 'two lines of attribution need more room than one',
+      );
+    });
+  });
+
   group('TitleBar does not let its halves collide', () {
     for (final width in widths) {
       testWidgets('no overflow and no overlap at ${width.round()} px', (t) async {

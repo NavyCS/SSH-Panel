@@ -1718,7 +1718,11 @@ class _DomainsTabState extends State<DomainsTab> {
     final theme = ShadTheme.of(context);
 
   return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          // No horizontal padding: the tab area already insets its content by
+          // 16 (see the ShadTabs Padding in this file), so this tab was ending
+          // up 32px in while Service and Keys, which scroll without padding of
+          // their own, sat at 16. A tab must not inset itself a second time.
+          padding: const EdgeInsets.symmetric(vertical: 16),
           children: [
           // ---- Config card ----
           ShadCard(

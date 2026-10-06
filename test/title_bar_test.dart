@@ -73,9 +73,9 @@ void main() {
 
         expect(
           bar.right - credit.right,
-          closeTo(20, 0.5),
-          reason: "only the bar's own 20px padding should separate the credit "
-              'from the window edge; anything more is unassigned slack',
+          closeTo(TitleBar.padding.right, 0.5),
+          reason: "only the bar's own padding should separate the credit from "
+              'the window edge; anything more is unassigned slack',
         );
       });
     }

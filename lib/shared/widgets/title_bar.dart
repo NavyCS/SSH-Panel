@@ -35,13 +35,21 @@ class TitleBar extends StatelessWidget {
   /// to be tuned together: widening the first is what hides a collision.
   static const double gap = 8;
 
+  /// The bar's own inset.
+  ///
+  /// Public because the tests assert that the attribution sits exactly this far
+  /// from the window edge, and a literal in the test is exactly the sort of
+  /// number that goes stale the first time the padding is retuned.
+  static const EdgeInsets padding =
+      EdgeInsets.symmetric(horizontal: 16, vertical: 14);
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: padding,
       decoration: BoxDecoration(
         color: theme.colorScheme.card,
         border: Border(

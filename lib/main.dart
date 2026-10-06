@@ -1718,11 +1718,13 @@ class _DomainsTabState extends State<DomainsTab> {
     final theme = ShadTheme.of(context);
 
   return ListView(
-          // No horizontal padding: the tab area already insets its content by
-          // 16 (see the ShadTabs Padding in this file), so this tab was ending
-          // up 32px in while Service and Keys, which scroll without padding of
-          // their own, sat at 16. A tab must not inset itself a second time.
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          // No padding at all. The tab area already insets its content by 16 on
+          // every side (the Padding that wraps the ShadTabs), so this tab was
+          // ending up 32px in horizontally while Service and Keys, which scroll
+          // with a bare SingleChildScrollView, sat at 16. Same story top and
+          // bottom: those two have no vertical padding of their own, so the 16
+          // here was making Hosts the only tab that did not start flush.
+          padding: EdgeInsets.zero,
           children: [
           // ---- Config card ----
           ShadCard(

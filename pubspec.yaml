@@ -39,6 +39,7 @@ dependencies:
   # helpers), so it must be declared rather than relied on transitively
   # through win32.
   ffi: ^2.1.0
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:

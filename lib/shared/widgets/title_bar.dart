@@ -62,7 +62,17 @@ class TitleBar extends StatelessWidget {
           // the bar and the title and the control painted on top of each other
           // (measured one pixel of overlap at the minimum window width). A
           // bounded title can be shortened instead.
-          Flexible(
+          // Expanded, not Flexible. Both children have to fill the share the
+          // flex gives them, or the one that does not leaves its remainder
+          // unassigned: with a loose title that remainder had nowhere to go and
+          // piled up at the end of the bar, so the credit sat 15px short of the
+          // right edge at the app's real width while every narrower width was
+          // correct -- which is why it survived a whole release of tests. The
+          // app name is inside a tight box now and left-aligned within it, so
+          // the slack reads as the gap between the name and the controls, which
+          // is where a gap belongs.
+          Expanded(
+            flex: 1,
             child: Text(
               'SSH Panel',
               maxLines: 1,

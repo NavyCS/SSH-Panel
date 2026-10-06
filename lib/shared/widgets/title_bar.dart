@@ -41,7 +41,7 @@ class TitleBar extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: theme.colorScheme.card,
         border: Border(
@@ -81,7 +81,7 @@ class TitleBar extends StatelessWidget {
               style: theme.textTheme.h3,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: gap),
           // Expanded, and deliberately with a larger flex than the title.
           //
           // This was the cause of the overlap: the group used to be a
@@ -158,7 +158,7 @@ class TitleBar extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: gap),
                 const Flexible(child: AppCredit()),
               ],
             ),

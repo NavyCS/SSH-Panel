@@ -37,6 +37,7 @@ or change the startup type.
 - [`winapp` CLI](https://github.com/microsoft/winappCli): `winget install
 Microsoft.winappcli`
 - OpenSSH (optional — the app detects its absence and degrades gracefully)
+- [Enigma Virtual Box](https://enigmaprotector.com/en/aboutvb.html) (optional — to package it into a portable EXE file)
 
 ## Project layout
 
@@ -79,17 +80,20 @@ winapp init .
 # 5. Generate a development certificate
 winapp cert generate
 
-# 6. Build the Windows release
+# 6. Generate Icon
+flutter pub run flutter_launcher_icons
+
+# 7. Build the Windows release
 flutter build windows --release
 
-# 7. Package into an MSIX and sign it
+# 8. Package into an MSIX and sign it
 #    NOTE: winapp package takes an INPUT folder, not an output path.
 winapp package build/windows/x64/runner/Release `
     --manifest Package.appxmanifest `
     --cert devcert.pfx `
     --output dist/ssh_panel.msix
 
-# 8. Install the certificate in the machine root store (requires elevation)
+# 9. Install the certificate in the machine root store (requires elevation)
 #    winapp cert install alone fails with access denied.
 powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy Bypass','-File','install-cert.ps1' -Verb RunAs -Wait"
 # install-cert.ps1:
@@ -102,7 +106,7 @@ powershell -Command "Start-Process powershell -ArgumentList '-NoProfile','-Execu
 #   $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
 #   $store.Add($cert); $store.Close()
 
-# 9. Install and run the MSIX
+# 10. Install and run the MSIX
 Add-AppxPackage -Path dist/ssh_panel.msix
 ```
 

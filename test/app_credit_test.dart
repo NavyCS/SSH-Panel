@@ -138,10 +138,23 @@ void main() {
       }
 
       debugPrint('credit heights by available width: $heights');
-      // Two lines of credit text, a gap, and one line of link: the height is
-      // the same whatever the width.
+      // Narrowing may only ever *add* lines, and never more than the one line
+      // line1 is allowed to wrap onto. The runaway this test was written for
+      // was +84px between two widths; +14 is the whole legitimate range.
+      for (var i = 1; i < heights.length; i++) {
+        expect(heights[i], greaterThanOrEqualTo(heights[i - 1]),
+            reason: 'narrowing must not shrink the credit. Measured: '
+                '$heights');
+        expect(heights[i] - heights[i - 1], lessThanOrEqualTo(14),
+            reason: 'one wrapped line per step is the entire budget. '
+                'Measured: $heights');
+      }
+      // Absolute cap: 52px of content (two lines of credit text, a gap, one
+      // line of link) plus the container's 2 * 4 padding and 2px border = 62,
+      // with 2px of slack. Anything past 64 means the box, not the text, is
+      // growing.
       expect(
-        heights.every((h) => h <= 56),
+        heights.every((h) => h <= 64),
         isTrue,
         reason: 'the credit may shrink in width, never in height. Measured: '
             '$heights',
@@ -152,6 +165,47 @@ void main() {
         lessThanOrEqualTo(16),
         reason: 'a wrapped link is what turned the bar into a column',
       );
+    });
+
+    testWidgets('adds only its documented box, when one line fits',
+        (tester) async {
+      // 700px of space is roomy enough for the whole credit on one line even
+      // with the test font, which is wider than Geist: the matrix above never
+      // sees the unwrapped case, so without this the container could double
+      // its padding and every height in it would stay flat and green.
+      await tester.pumpWidget(_titleBar(700));
+
+      expect(tester.takeException(), isNull);
+      // 38px of content (line + gap + link box) + padding (vertical already
+      // counts top and bottom) + 2px of border.
+      expect(
+        tester.getSize(find.byType(AppCredit)).height,
+        38 + AppCredit.boxPadding.vertical + 2,
+        reason: 'the container may cost its own padding, nothing more; '
+            'otherwise the title bar grows with it',
+      );
+    });
+
+    testWidgets('paints the box from the theme, not from literals',
+        (tester) async {
+      await tester.pumpWidget(harness(const AppCredit()));
+
+      final theme = ShadTheme.of(tester.element(find.byType(AppCredit)));
+      final container = tester.widget<Container>(
+        find
+            .descendant(
+                of: find.byType(AppCredit), matching: find.byType(Container))
+            .first,
+      );
+      final decoration = container.decoration! as BoxDecoration;
+
+      expect(decoration.color, theme.colorScheme.card,
+          reason: 'same fill as the section cards');
+      expect((decoration.border as Border).top.color, theme.colorScheme.border,
+          reason: 'same hairline as the section cards');
+      expect(decoration.borderRadius, theme.cardTheme.radius ?? theme.radius,
+          reason: 'same radius as the section cards');
+      expect(container.padding, AppCredit.boxPadding);
     });
 
     testWidgets('is reachable with the keyboard', (tester) async {

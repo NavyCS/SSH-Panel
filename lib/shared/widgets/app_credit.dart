@@ -5,10 +5,23 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../toast_service.dart';
 
 /// Two-line attribution pinned to the right-hand end of the title bar:
-/// `Made with ❤️ & 🤖 by navy_cs`, and under it a `github` link.
+/// `Made with ❤️ & 🤖 by navy_cs`, and under it a `github` link — drawn
+/// inside a small bordered box so it reads as a widget of the strip rather
+/// than as loose text.
 ///
-/// It lives in its own file because three details are easy to get wrong when
+/// It lives in its own file because four details are easy to get wrong when
 /// the credit is written inline in the title-bar [Row]:
+///
+/// * **It sits in a container, but not in a [ShadCard].** The sections use
+///   [ShadCard], whose defaults are a 24px inset plus an h3 [ShadCard.title]
+///   and a [ShadCard.description] line; an attribution has no title and no
+///   description to announce, and that much inset would blow the height
+///   budget of a bar that is already tight. So the box here is the same box
+///   one notch down: [ShadColorScheme.card] fill, a hairline in
+///   [ShadColorScheme.border], and the very radius the cards resolve to
+///   (`cardTheme.radius`, 8 in the default variant) — no invented values,
+///   and no elevation shadow, because nothing else on this flat chrome strip
+///   floats.
 ///
 /// * **It has to be able to shrink, without pushing its neighbours around.**
 ///   The credit sits after the optional Admin Mode control, so how much room
@@ -18,7 +31,11 @@ import '../../toast_service.dart';
 ///   there is not, and never a fixed width of its own that the bar would have
 ///   to overflow. Inside, the text right-aligns and may wrap onto a second
 ///   line before it ellipsizes — the author's name is the last thing to be
-///   cut, not the first.
+///   cut, not the first. The container's own padding is the only height it
+///   adds: 48px while the first line fits on one line, 62px once it wraps —
+///   and it stops there, whatever the window does below that. Both numbers
+///   are asserted, so growing the box is a failing test rather than a taller
+///   bar.
 ///
 /// * **The link must not be Material blue.** Every colour in this app comes
 ///   from [ShadThemeData]; a [TextButton] would instead paint the Material
@@ -49,25 +66,50 @@ class AppCredit extends StatelessWidget {
   /// homepage. When the project lands the URL changes here and nowhere else.
   static const String githubUrl = 'https://github.com';
 
+  /// The box's own inset, the one value here that is not a theme token.
+  ///
+  /// Small on purpose: `vertical` is what decides how much taller the title
+  /// bar gets, so it stays at the amount needed to keep the link's focus ring
+  /// from sitting on the outer border (4px + the border below), while
+  /// `horizontal` gives the text the same breathing room an outline button
+  /// has.
+  ///
+  /// Public because the height budget it produces is asserted in the tests:
+  /// content + [vertical] (already top + bottom) + 2 for the border.
+  static const EdgeInsets boxPadding = EdgeInsets.symmetric(
+    horizontal: 8,
+    vertical: 4,
+  );
+
   @override
   Widget build(BuildContext context) {
     final theme = ShadTheme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Text(
-          'Made with ❤️ & 🤖 by navy_cs',
-          textAlign: TextAlign.right,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.small.copyWith(
-            color: theme.colorScheme.mutedForeground,
+    return Container(
+      padding: boxPadding,
+      // The same three values a section card resolves to: card fill, hairline
+      // border, card radius. Nothing here is a literal colour.
+      decoration: BoxDecoration(
+        color: theme.colorScheme.card,
+        border: Border.all(color: theme.colorScheme.border, width: 1),
+        borderRadius: theme.cardTheme.radius ?? theme.radius,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            'Made with ❤️ & 🤖 by navy_cs',
+            textAlign: TextAlign.right,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.small.copyWith(
+              color: theme.colorScheme.mutedForeground,
+            ),
           ),
-        ),
-        const SizedBox(height: 4),
-        const _GithubLink(),
-      ],
+          const SizedBox(height: 4),
+          const _GithubLink(),
+        ],
+      ),
     );
   }
 }

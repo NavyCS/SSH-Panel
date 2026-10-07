@@ -63,7 +63,11 @@ dist/
 # IDE / tooling metadata
 .metadata
 .omo/
-*.evb
+
+# ssh_panel_portable.evb SI se versiona a proposito: el paso de Enigma Virtual
+# Box del workflow de release lo necesita en el runner, y dentro solo hay
+# rutas relativas al repositorio, sin rutas de maquina. No volver a ignorarlo
+# o la release portable falla en CI.
 
 # Loam
 loam-report*.json

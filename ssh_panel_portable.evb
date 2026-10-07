@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="windows-1252"?>
 <>
   <InputFile>build\windows\x64\runner\Release\ssh_panel.exe</InputFile>
-  <OutputFile>.\dist\SSH_Panel_Portable.exe</OutputFile>
+  <OutputFile>dist\SSH_Panel_Portable.exe</OutputFile>
   <Files>
     <Enabled>True</Enabled>
     <DeleteExtractedOnExit>False</DeleteExtractedOnExit>

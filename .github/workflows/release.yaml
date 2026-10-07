@@ -37,8 +37,20 @@ jobs:
       - name: Descargar e instalar Enigma Virtual Box
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe"
-          Start-Process -FilePath ".\enigmavb.exe" -ArgumentList "/VERYSILENT" -Wait
+          $maxRetries = 3
+          $retryCount = 0
+          while ($retryCount -lt $maxRetries) {
+            try {
+                Invoke-WebRequest -Uri "https://enigmaprotector.com/assets/files/enigmavb.exe" -OutFile "enigmavb.exe"
+                Unblock-File -Path "enigmavb.exe"
+                Start-Process -FilePath ".\enigmavb.exe" -ArgumentList "/VERYSILENT" -Wait -ErrorAction Stop
+                break
+            } catch {
+                $retryCount++
+                if ($retryCount -eq $maxRetries) { throw }
+                Start-Sleep -Seconds 5
+            }
+          }
 
       - name: Crear ejecutable portable (Un solo .exe)
         shell: powershell

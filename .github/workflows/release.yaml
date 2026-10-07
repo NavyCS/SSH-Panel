@@ -52,6 +52,10 @@ jobs:
             }
           }
 
+      - name: Crear carpeta para portable con PowerShell
+        shell: powershell
+        run: New-Item -ItemType Directory -Path "portable" -Force
+
       - name: Crear ejecutable portable (Un solo .exe)
         shell: powershell
         run: |

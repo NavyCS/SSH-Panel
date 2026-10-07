@@ -1,6 +1,6 @@
 ﻿<?xml version="1.0" encoding="windows-1252"?>
 <>
-  <InputFile>.\build\windows\x64\runner\Release\ssh_panel.exe</InputFile>
+  <InputFile>build\windows\x64\runner\Release\ssh_panel.exe</InputFile>
   <OutputFile>.\dist\SSH_Panel_Portable.exe</OutputFile>
   <Files>
     <Enabled>True</Enabled>
@@ -18,7 +18,7 @@
           <File>
             <Type>2</Type>
             <Name>dartjni.dll</Name>
-            <File>.\build\windows\x64\runner\Release\dartjni.dll</File>
+            <File>build\windows\x64\runner\Release\dartjni.dll</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>
@@ -38,7 +38,7 @@
               <File>
                 <Type>2</Type>
                 <Name>app.so</Name>
-                <File>.\build\windows\x64\runner\Release\data\app.so</File>
+                <File>build\windows\x64\runner\Release\data\app.so</File>
                 <ActiveX>False</ActiveX>
                 <ActiveXInstall>False</ActiveXInstall>
                 <Action>0</Action>
@@ -58,7 +58,7 @@
                   <File>
                     <Type>2</Type>
                     <Name>AssetManifest.bin</Name>
-                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\AssetManifest.bin</File>
+                    <File>build\windows\x64\runner\Release\data\flutter_assets\AssetManifest.bin</File>
                     <ActiveX>False</ActiveX>
                     <ActiveXInstall>False</ActiveXInstall>
                     <Action>0</Action>
@@ -78,7 +78,7 @@
                       <File>
                         <Type>2</Type>
                         <Name>logo.svg</Name>
-                        <File>.\build\windows\x64\runner\Release\data\flutter_assets\assets\logo.svg</File>
+                        <File>build\windows\x64\runner\Release\data\flutter_assets\assets\logo.svg</File>
                         <ActiveX>False</ActiveX>
                         <ActiveXInstall>False</ActiveXInstall>
                         <Action>0</Action>
@@ -92,7 +92,7 @@
                   <File>
                     <Type>2</Type>
                     <Name>FontManifest.json</Name>
-                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\FontManifest.json</File>
+                    <File>build\windows\x64\runner\Release\data\flutter_assets\FontManifest.json</File>
                     <ActiveX>False</ActiveX>
                     <ActiveXInstall>False</ActiveXInstall>
                     <Action>0</Action>
@@ -112,7 +112,7 @@
                       <File>
                         <Type>2</Type>
                         <Name>MaterialIcons-Regular.otf</Name>
-                        <File>.\build\windows\x64\runner\Release\data\flutter_assets\fonts\MaterialIcons-Regular.otf</File>
+                        <File>build\windows\x64\runner\Release\data\flutter_assets\fonts\MaterialIcons-Regular.otf</File>
                         <ActiveX>False</ActiveX>
                         <ActiveXInstall>False</ActiveXInstall>
                         <Action>0</Action>
@@ -126,7 +126,7 @@
                   <File>
                     <Type>2</Type>
                     <Name>NativeAssetsManifest.json</Name>
-                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\NativeAssetsManifest.json</File>
+                    <File>build\windows\x64\runner\Release\data\flutter_assets\NativeAssetsManifest.json</File>
                     <ActiveX>False</ActiveX>
                     <ActiveXInstall>False</ActiveXInstall>
                     <Action>0</Action>
@@ -138,7 +138,7 @@
                   <File>
                     <Type>2</Type>
                     <Name>NOTICES.Z</Name>
-                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\NOTICES.Z</File>
+                    <File>build\windows\x64\runner\Release\data\flutter_assets\NOTICES.Z</File>
                     <ActiveX>False</ActiveX>
                     <ActiveXInstall>False</ActiveXInstall>
                     <Action>0</Action>
@@ -182,7 +182,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w100.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w100.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w100.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -194,7 +194,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w200.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w200.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w200.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -206,7 +206,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w300.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w300.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w300.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -218,7 +218,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w400.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w400.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w400.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -230,7 +230,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w500.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w500.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w500.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -242,7 +242,7 @@
                                   <File>
                                     <Type>2</Type>
                                     <Name>LucideVariable-w600.ttf</Name>
-                                    <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w600.ttf</File>
+                                    <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\build_font\LucideVariable-w600.ttf</File>
                                     <ActiveX>False</ActiveX>
                                     <ActiveXInstall>False</ActiveXInstall>
                                     <Action>0</Action>
@@ -256,7 +256,7 @@
                               <File>
                                 <Type>2</Type>
                                 <Name>lucide.ttf</Name>
-                                <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\lucide.ttf</File>
+                                <File>build\windows\x64\runner\Release\data\flutter_assets\packages\lucide_icons_flutter\assets\lucide.ttf</File>
                                 <ActiveX>False</ActiveX>
                                 <ActiveXInstall>False</ActiveXInstall>
                                 <Action>0</Action>
@@ -288,7 +288,7 @@
                               <File>
                                 <Type>2</Type>
                                 <Name>Geist%5Bwght%5D.ttf</Name>
-                                <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\shadcn_ui\fonts\Geist%5Bwght%5D.ttf</File>
+                                <File>build\windows\x64\runner\Release\data\flutter_assets\packages\shadcn_ui\fonts\Geist%5Bwght%5D.ttf</File>
                                 <ActiveX>False</ActiveX>
                                 <ActiveXInstall>False</ActiveXInstall>
                                 <Action>0</Action>
@@ -300,7 +300,7 @@
                               <File>
                                 <Type>2</Type>
                                 <Name>GeistMono%5Bwght%5D.ttf</Name>
-                                <File>.\build\windows\x64\runner\Release\data\flutter_assets\packages\shadcn_ui\fonts\GeistMono%5Bwght%5D.ttf</File>
+                                <File>build\windows\x64\runner\Release\data\flutter_assets\packages\shadcn_ui\fonts\GeistMono%5Bwght%5D.ttf</File>
                                 <ActiveX>False</ActiveX>
                                 <ActiveXInstall>False</ActiveXInstall>
                                 <Action>0</Action>
@@ -326,7 +326,7 @@
                       <File>
                         <Type>2</Type>
                         <Name>ink_sparkle.frag</Name>
-                        <File>.\build\windows\x64\runner\Release\data\flutter_assets\shaders\ink_sparkle.frag</File>
+                        <File>build\windows\x64\runner\Release\data\flutter_assets\shaders\ink_sparkle.frag</File>
                         <ActiveX>False</ActiveX>
                         <ActiveXInstall>False</ActiveXInstall>
                         <Action>0</Action>
@@ -338,7 +338,7 @@
                       <File>
                         <Type>2</Type>
                         <Name>stretch_effect.frag</Name>
-                        <File>.\build\windows\x64\runner\Release\data\flutter_assets\shaders\stretch_effect.frag</File>
+                        <File>build\windows\x64\runner\Release\data\flutter_assets\shaders\stretch_effect.frag</File>
                         <ActiveX>False</ActiveX>
                         <ActiveXInstall>False</ActiveXInstall>
                         <Action>0</Action>
@@ -354,7 +354,7 @@
               <File>
                 <Type>2</Type>
                 <Name>icudtl.dat</Name>
-                <File>.\build\windows\x64\runner\Release\data\icudtl.dat</File>
+                <File>build\windows\x64\runner\Release\data\icudtl.dat</File>
                 <ActiveX>False</ActiveX>
                 <ActiveXInstall>False</ActiveXInstall>
                 <Action>0</Action>
@@ -368,7 +368,7 @@
           <File>
             <Type>2</Type>
             <Name>flutter_windows.dll</Name>
-            <File>.\build\windows\x64\runner\Release\flutter_windows.dll</File>
+            <File>build\windows\x64\runner\Release\flutter_windows.dll</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>
@@ -380,7 +380,7 @@
           <File>
             <Type>2</Type>
             <Name>native_assets.json</Name>
-            <File>.\build\windows\x64\runner\Release\native_assets.json</File>
+            <File>build\windows\x64\runner\Release\native_assets.json</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>
@@ -392,7 +392,7 @@
           <File>
             <Type>2</Type>
             <Name>ssh_panel.exe</Name>
-            <File>.\build\windows\x64\runner\Release\ssh_panel.exe</File>
+            <File>build\windows\x64\runner\Release\ssh_panel.exe</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>
@@ -404,7 +404,7 @@
           <File>
             <Type>2</Type>
             <Name>url_launcher_windows_plugin.dll</Name>
-            <File>.\build\windows\x64\runner\Release\url_launcher_windows_plugin.dll</File>
+            <File>build\windows\x64\runner\Release\url_launcher_windows_plugin.dll</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>

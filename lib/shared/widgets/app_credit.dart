@@ -64,9 +64,9 @@ class AppCredit extends StatelessWidget {
 
   /// What the `github` link points at.
   ///
-  /// The repository has not been published yet, so this is the plain GitHub
-  /// homepage. When the project lands the URL changes here and nowhere else.
-  static const String githubUrl = 'https://github.com';
+  /// The public repository. `repository:` in pubspec.yaml carries the same
+  /// URL, and nothing enforces that they agree, so change both together.
+  static const String githubUrl = 'https://github.com/NavyCS/SSH-Panel';
 
   /// How the app version is shown in the credit: `v1.0`.
   ///

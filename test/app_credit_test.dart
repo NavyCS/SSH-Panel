@@ -51,7 +51,7 @@ void main() {
   group('AppCredit', () {
     test('points the link at a named constant, not a literal in the widget',
         () {
-      expect(AppCredit.githubUrl, 'https://github.com');
+      expect(AppCredit.githubUrl, 'https://github.com/NavyCS/SSH-Panel');
     });
 
     testWidgets('renders both lines', (tester) async {

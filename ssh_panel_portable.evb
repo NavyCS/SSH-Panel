@@ -125,18 +125,6 @@
                   </File>
                   <File>
                     <Type>2</Type>
-                    <Name>NativeAssetsManifest.json</Name>
-                    <File>build\windows\x64\runner\Release\data\flutter_assets\NativeAssetsManifest.json</File>
-                    <ActiveX>False</ActiveX>
-                    <ActiveXInstall>False</ActiveXInstall>
-                    <Action>0</Action>
-                    <OverwriteDateTime>False</OverwriteDateTime>
-                    <OverwriteAttributes>False</OverwriteAttributes>
-                    <PassCommandLine>False</PassCommandLine>
-                    <HideFromDialogs>0</HideFromDialogs>
-                  </File>
-                  <File>
-                    <Type>2</Type>
                     <Name>NOTICES.Z</Name>
                     <File>build\windows\x64\runner\Release\data\flutter_assets\NOTICES.Z</File>
                     <ActiveX>False</ActiveX>
@@ -369,18 +357,6 @@
             <Type>2</Type>
             <Name>flutter_windows.dll</Name>
             <File>build\windows\x64\runner\Release\flutter_windows.dll</File>
-            <ActiveX>False</ActiveX>
-            <ActiveXInstall>False</ActiveXInstall>
-            <Action>0</Action>
-            <OverwriteDateTime>False</OverwriteDateTime>
-            <OverwriteAttributes>False</OverwriteAttributes>
-            <PassCommandLine>False</PassCommandLine>
-            <HideFromDialogs>0</HideFromDialogs>
-          </File>
-          <File>
-            <Type>2</Type>
-            <Name>native_assets.json</Name>
-            <File>build\windows\x64\runner\Release\native_assets.json</File>
             <ActiveX>False</ActiveX>
             <ActiveXInstall>False</ActiveXInstall>
             <Action>0</Action>

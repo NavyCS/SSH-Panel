@@ -64,3 +64,4 @@ jobs:
           artifacts: "SSH-Panel-Release.zip,SSH_Panel_Portable.exe"
           token: ${{ secrets.GITHUB_TOKEN }}
           generateReleaseNotes: true
+          allowUpdates: true

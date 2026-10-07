@@ -152,14 +152,16 @@ winapp run build/windows/x64/runner/Release
   (`.../foundation/windows10/restrictedcapabilities`), _not_ `desktop6`.
 - `winapp pack <output>` is invalid — `pack` aliases `package`, which takes an
   **input folder**.
-- Loading a passphrase-protected key keeps the passphrase off the command line:
-  it reaches `ssh-keygen` through an `SSH_ASKPASS` helper (a `.cmd` that prints
-  a sibling passphrase file) with `SSH_ASKPASS_REQUIRE=force` and `DISPLAY` set,
-  so the value never lands in the process table, where any process on the
-  machine can read a command-line argument. Stdin is not an alternative either —
-  `ssh-keygen` on Windows blocks forever without a TTY.
-- Key generation uses `ssh-keygen -P` (not `-N`, which Win32-OpenSSH's
-  `ssh-keygen` ignores).
+- Both passphrase paths keep the value off the command line: it reaches
+  `ssh-keygen` through an `SSH_ASKPASS` helper (a `.cmd` that prints a sibling
+  passphrase file) with `SSH_ASKPASS_REQUIRE=force` and `DISPLAY` set — loading
+  a key and generating one alike — so the value never lands in the process
+  table, where any process on the machine can read a command-line argument
+  (`Get-CimInstance Win32_Process`, the Details tab of Task Manager, EDR
+  agents). The only `-P` left is `-P ''` for a key without a passphrase, which
+  is not a secret. Stdin is not an alternative either — `ssh-keygen` on Windows
+  blocks forever without a TTY.
+- Key generation never uses `-N` (Win32-OpenSSH's `ssh-keygen` ignores it).
 - `flutter doctor` may warn the Visual Studio install is incomplete even though
   MSBuild, `cl.exe`, `link.exe` and the Windows 10 SDK are all present and the
   build succeeds.

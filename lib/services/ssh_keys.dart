@@ -11,8 +11,10 @@
 /// **Windows-specific notes:**
 ///
 /// * `ssh-keygen -N` is broken on Win32-OpenSSH (#1609) — we use `-P` instead.
-/// * `ssh-keygen` hangs on Windows when stdin is not a TTY (#836) — the
-///   passphrase is passed purely via the `-P` argument; stdin is never used.
+/// * `ssh-keygen` hangs on Windows when stdin is not a TTY (#836) — stdin is
+///   never used. A non-empty passphrase reaches `ssh-keygen` through an
+///   `SSH_ASKPASS` helper on both paths (loading and generation) instead of a
+///   `-P` argument, which would expose it in the process table.
 /// * All command invocations use a Dart-built `List<String>` so the passphrase
 ///   is never interpolated into a shell string.
 library;
@@ -499,6 +501,54 @@ class SshKeyManager {
     }
   }
 
+  /// The exact body of the `askpass.cmd` helper written next to
+  /// `passphrase.txt` by [_writeAskpassHandoff].
+  ///
+  /// The script only prints the sibling file, so the passphrase itself is
+  /// never written into it and no cmd metacharacter escaping is needed —
+  /// `%`, `&`, `"` and friends would otherwise be mangled or injected into
+  /// the command line. Public only so tests can pin these bytes.
+  static const askpassHelperScript = '@echo off\r\ntype "%~dp0passphrase.txt"\r\n';
+
+  /// Writes the `SSH_ASKPASS` hand-off for [passphrase] into [workDir] and
+  /// returns the environment that makes `ssh-keygen` read it.
+  ///
+  /// This is the single place that explains the hand-off, shared by both
+  /// callers — loading a key (`_addKeyWithPassphrase`) and generating one
+  /// (`generateKey`):
+  ///
+  /// The passphrase reaches ssh-keygen through SSH_ASKPASS rather than -P.
+  /// Passing -P would put it in the process command line, where any process
+  /// on the machine can read it: `Get-CimInstance Win32_Process`, the
+  /// Details tab of Task Manager, and most EDR agents all expose it.
+  ///
+  /// stdin is not an option: ssh-keygen on Windows blocks forever without a
+  /// TTY (verified here -- it hung until killed). SSH_ASKPASS with
+  /// SSH_ASKPASS_REQUIRE=force works without a TTY.
+  ///
+  /// [workDir] must already be restricted with
+  /// [FilePermissions.restrictToOwner]: this is where the passphrase touches
+  /// disk. The caller owns [workDir] and must delete it recursively in a
+  /// `finally` — that deletion is what removes `passphrase.txt` and
+  /// `askpass.cmd` on every outcome, success, failure or thrown exception.
+  Future<Map<String, String>> _writeAskpassHandoff(
+    Directory workDir,
+    String passphrase,
+  ) async {
+    final sep = Platform.pathSeparator;
+    final passphraseFile = File('${workDir.path}${sep}passphrase.txt');
+    final helperFile = File('${workDir.path}${sep}askpass.cmd');
+    await passphraseFile.writeAsString(passphrase, flush: true);
+    await helperFile.writeAsString(askpassHelperScript, flush: true);
+    return {
+      'SSH_ASKPASS': helperFile.path,
+      // Required on Windows, where ssh would otherwise insist on a TTY.
+      'SSH_ASKPASS_REQUIRE': 'force',
+      // Some builds only consult SSH_ASKPASS when DISPLAY is set.
+      'DISPLAY': 'ssh_panel',
+    };
+  }
+
   /// Adds a passphrase-protected key by creating a temporary copy, removing its
   /// passphrase using `ssh-keygen -p`, adding the temporary key to `ssh-agent`,
   /// and then securely deleting the temporary file.
@@ -539,37 +589,16 @@ class SshKeyManager {
 
       await origFile.copy(tempFile.path);
 
-      // The passphrase reaches ssh-keygen through SSH_ASKPASS rather than -P.
-      // Passing -P would put it in the process command line, where any process
-      // on the machine can read it: `Get-CimInstance Win32_Process`, the
-      // Details tab of Task Manager, and most EDR agents all expose it.
-      //
-      // stdin is not an option: ssh-keygen on Windows blocks forever without a
-      // TTY (verified here -- it hung until killed). SSH_ASKPASS with
-      // SSH_ASKPASS_REQUIRE=force works without a TTY.
-      //
-      // The helper is a .cmd that prints a sibling file, so the passphrase
-      // needs no cmd escaping -- `%`, `&`, `"` and friends would otherwise be
-      // mangled or injected into the command line.
-      final passphraseFile = File('${workDir.path}${sep}passphrase.txt');
-      final helperFile = File('${workDir.path}${sep}askpass.cmd');
-      await passphraseFile.writeAsString(passphrase, flush: true);
-      await helperFile.writeAsString(
-        '@echo off\r\ntype "%~dp0passphrase.txt"\r\n',
-        flush: true,
-      );
+      // SSH_ASKPASS hand-off instead of -P: the shared explanation of why
+      // (process table, TTY) lives in _writeAskpassHandoff, which generateKey
+      // uses too.
+      final askpassEnvironment = await _writeAskpassHandoff(workDir, passphrase);
 
       final keygenResult = await _runWithTimeout(
         'ssh-keygen',
         ['-p', '-N', '', '-f', tempFile.path],
         timeout: const Duration(seconds: 10),
-        environment: {
-          'SSH_ASKPASS': helperFile.path,
-          // Required on Windows, where ssh would otherwise insist on a TTY.
-          'SSH_ASKPASS_REQUIRE': 'force',
-          // Some builds only consult SSH_ASKPASS when DISPLAY is set.
-          'DISPLAY': 'ssh_panel',
-        },
+        environment: askpassEnvironment,
       );
 
       if (keygenResult.exitCode != 0) {
@@ -709,11 +738,17 @@ class SshKeyManager {
   /// * [comment] — optional comment embedded in the public key (typically an
   ///   email address).
   ///
-  /// Uses `-P` (not `-N`) to supply the passphrase because Win32-OpenSSH's
-  /// `ssh-keygen` ignores `-N` (issue #1609).
+  /// `-N` is never used: Win32-OpenSSH's `ssh-keygen` ignores it (issue #1609).
   ///
-  /// The passphrase is never interpolated into a shell string — it is passed
-  /// as a discrete argument to `Process.run(arguments: …)`.
+  /// A non-empty passphrase is not passed as `-P` either — it reaches
+  /// `ssh-keygen` through the `SSH_ASKPASS` hand-off shared with the loading
+  /// path (why, and why not stdin, is explained once in
+  /// [_writeAskpassHandoff]), and its helper files are deleted in a `finally`
+  /// on every outcome. An empty passphrase is still passed as `-P ''`, which
+  /// is not a secret and needs no helper file.
+  ///
+  /// The passphrase is never interpolated into a shell string — argv is a
+  /// Dart-built `List<String>` and the helper only prints a file.
   ///
   /// Throws [SshKeyException] with code [SshKeyErrorCode.fileExists] if the
   /// target private-key path already exists.
@@ -767,17 +802,138 @@ class SshKeyManager {
     final stagingPub = '$stagingStem.pub';
 
     // Build the argument list.
-    // NEVER use -N (broken on Windows).  Use -P instead.
+    // NEVER use -N (broken on Windows).  An empty passphrase still goes
+    // through -P ""; a non-empty one never touches argv -- see
+    // buildGenerateKeyArgs and _writeAskpassHandoff.
+    final args = buildGenerateKeyArgs(
+      stagingKey: stagingKey,
+      algorithm: algorithm,
+      passphrase: passphrase,
+      comment: comment,
+    );
+
+    // The hand-off exists only when there is a passphrase to hand over, and it
+    // is created after the fail-fast checks above, so an early exit never
+    // writes the secret to disk.
+    Directory? askpassDir;
+    try {
+      Map<String, String>? environment;
+      if (passphrase != null && passphrase.isNotEmpty) {
+        askpassDir = Directory.systemTemp.createTempSync('ssh_panel_');
+        // This path now writes the passphrase to disk, so the holding
+        // directory gets the same owner-only ACL as the loading path before
+        // anything is written into it.
+        await FilePermissions.restrictToOwner(askpassDir);
+        environment = await _writeAskpassHandoff(askpassDir, passphrase);
+      }
+
+      // Run ssh-keygen.  stdin is NOT connected because ssh-keygen hangs on
+      // Windows when stdin is not a TTY (issue #836).  A non-empty passphrase
+      // is supplied solely via the SSH_ASKPASS environment (see
+      // _writeAskpassHandoff); an empty one via -P "".  Parent environment is
+      // included, otherwise PATH would be replaced and ssh-keygen not found.
+      final result = await Process.run(
+        args.first,
+        args.sublist(1),
+        runInShell: false,
+        environment: environment,
+        includeParentEnvironment: true,
+      ).timeout(const Duration(seconds: 30), onTimeout: () {
+        throw SshKeyException(
+          SshKeyErrorCode.keygenFailed,
+          'ssh-keygen timed out after 30s.',
+        );
+      });
+
+      if (result.exitCode != 0) {
+        // Clean up the staging files ssh-keygen may have partially written.
+        await _deleteIfExists(stagingKey);
+        await _deleteIfExists(stagingPub);
+
+        // ssh-keygen can also fail because the *final* path appeared while we
+        // were generating. Surface that as the specific "file exists" case
+        // rather than a generic generation failure.
+        if (await File(keyPath).exists()) {
+          throw SshKeyException(
+            SshKeyErrorCode.fileExists,
+            'The key file already exists: $keyPath',
+          );
+        }
+
+        throw SshKeyException(
+          SshKeyErrorCode.keygenFailed,
+          'ssh-keygen failed (exit code ${result.exitCode}).',
+          rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
+        );
+      }
+
+      // Publish the staged keys at their final names.
+      try {
+        await File(stagingKey).rename(keyPath);
+        await File(stagingPub).rename(pubPath);
+      } catch (e) {
+        // Do not leave half-published state behind.
+        await _deleteIfExists(stagingKey);
+        await _deleteIfExists(stagingPub);
+        await _deleteIfExists(keyPath);
+        await _deleteIfExists(pubPath);
+        throw SshKeyException(
+          SshKeyErrorCode.keygenFailed,
+          'The key was generated but could not be moved into place.',
+          rawDetail: e.toString(),
+        );
+      }
+    } finally {
+      // Removes passphrase.txt and askpass.cmd on every outcome -- success,
+      // non-zero exit, thrown SshKeyException or timeout. It composes with the
+      // staging cleanup above rather than replacing it: that one deletes the
+      // staged key files individually, this one deletes the helper directory
+      // wholesale, so neither path can leave the passphrase behind.
+      if (askpassDir != null) {
+        try {
+          if (await askpassDir.exists()) {
+            await askpassDir.delete(recursive: true);
+          }
+        } catch (e) {
+          _warn(
+            'A temporary file could not be deleted and may still contain '
+            'your passphrase: ${askpassDir.path} ($e)',
+          );
+        }
+      }
+    }
+  }
+
+  /// Builds the complete `ssh-keygen` argument vector for [generateKey],
+  /// executable name included.
+  ///
+  /// A null or empty passphrase is passed as `-P ''` (an empty argument is not
+  /// a secret). A non-empty passphrase must never appear here at all: it goes
+  /// through the `SSH_ASKPASS` hand-off instead — see [_writeAskpassHandoff]
+  /// for why argv is the wrong channel.
+  ///
+  /// Public only so tests can assert that no element of the argv equals or
+  /// contains the passphrase; [generateKey] is the sole caller.
+  List<String> buildGenerateKeyArgs({
+    required String stagingKey,
+    required KeyAlgorithm algorithm,
+    String? passphrase,
+    String? comment,
+  }) {
+    // NEVER use -N (broken on Windows).  Use -P instead -- but only to state
+    // that there is no passphrase; a real one never enters the argv.
     final args = <String>[
       'ssh-keygen',
       '-t',
       algorithm.type,
       '-f',
       stagingKey,
-      // -P "" means no passphrase (different from -N "" which is broken).
-      '-P',
-      passphrase ?? '',
     ];
+
+    if (passphrase == null || passphrase.isEmpty) {
+      // -P "" means no passphrase (different from -N "" which is broken).
+      args.addAll(['-P', '']);
+    }
 
     // RSA requires explicit bit size (GitLab recommends 4096).
     if (algorithm == KeyAlgorithm.rsa) {
@@ -790,58 +946,7 @@ class SshKeyManager {
         ..add(comment);
     }
 
-    // Run ssh-keygen.  stdin is NOT connected because ssh-keygen hangs on
-    // Windows when stdin is not a TTY (issue #836).  The passphrase is
-    // supplied solely via the -P argument.
-    final result = await Process.run(
-      args.first,
-      args.sublist(1),
-      runInShell: false,
-    ).timeout(const Duration(seconds: 30), onTimeout: () {
-      throw SshKeyException(
-        SshKeyErrorCode.keygenFailed,
-        'ssh-keygen timed out after 30s.',
-      );
-    });
-
-    if (result.exitCode != 0) {
-      // Clean up the staging files ssh-keygen may have partially written.
-      await _deleteIfExists(stagingKey);
-      await _deleteIfExists(stagingPub);
-
-      // ssh-keygen can also fail because the *final* path appeared while we
-      // were generating. Surface that as the specific "file exists" case
-      // rather than a generic generation failure.
-      if (await File(keyPath).exists()) {
-        throw SshKeyException(
-          SshKeyErrorCode.fileExists,
-          'The key file already exists: $keyPath',
-        );
-      }
-
-      throw SshKeyException(
-        SshKeyErrorCode.keygenFailed,
-        'ssh-keygen failed (exit code ${result.exitCode}).',
-        rawDetail: '${utf8.decode(result.stdout)}\n${utf8.decode(result.stderr)}',
-      );
-    }
-
-    // Publish the staged keys at their final names.
-    try {
-      await File(stagingKey).rename(keyPath);
-      await File(stagingPub).rename(pubPath);
-    } catch (e) {
-      // Do not leave half-published state behind.
-      await _deleteIfExists(stagingKey);
-      await _deleteIfExists(stagingPub);
-      await _deleteIfExists(keyPath);
-      await _deleteIfExists(pubPath);
-      throw SshKeyException(
-        SshKeyErrorCode.keygenFailed,
-        'The key was generated but could not be moved into place.',
-        rawDetail: e.toString(),
-      );
-    }
+    return args;
   }
 
   /// Deletes [path] if it exists, ignoring the result.

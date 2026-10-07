@@ -1,7 +1,13 @@
-# SSH Panel
+# <img width="25" height="25" alt="icon" src="assets/icon.png" /> SSH Panel
 
-Windows desktop application for managing the OpenSSH `ssh-agent` service,
-SSH keys, and `~/.ssh/config` / `known_hosts`.
+Windows desktop application for managing the OpenSSH `ssh-agent` service,SSH keys, and `~/.ssh/config` / `known_hosts`.
+
+<p align="center">
+  <img width="48%" alt="01" src="https://github.com/user-attachments/assets/b41a9bbc-6853-4217-82fc-8e9d80a8338c" />
+  <img width="48%" alt="02" src="https://github.com/user-attachments/assets/0a4f960b-8766-423c-a96b-94779ddeda23" />
+  <img width="48%" alt="03" src="https://github.com/user-attachments/assets/4efc3408-0d7d-4035-a3c4-32a35fcb9941" />
+  <img width="48%" alt="04" src="https://github.com/user-attachments/assets/491a4183-0c7d-402c-a4b9-3cccaefbd039" />
+</p>
 
 Built with Flutter and the [shadcn/ui](https://pub.dev/packages/shadcn_ui) component
 library. Service control goes through the Windows Service Control Manager via

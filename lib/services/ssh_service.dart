@@ -160,7 +160,7 @@ class SshServiceException implements Exception {
 /// actionable hint. Returns the empty string for unknown codes.
 String _scmFailureHint(int code) => switch (code) {
       5 => 'access denied (the app is not running elevated)',
-      1058 => 'the SCM itself is disabled or not running',
+      1058 => 'the service itself is disabled (startup type DISABLED)',
       1060 => 'the SCM service is not installed',
       1063 => 'the SCM is not accessible from this session',
       _ => '',

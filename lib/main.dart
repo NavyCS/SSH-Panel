@@ -422,6 +422,9 @@ class _ServiceTabState extends State<ServiceTab> {
     final isElevated = SettingsService.isProcessElevated();
     final isOnceMode = SettingsService.elevationModeNotifier.value == SettingsService.modeOnce;
     final adminEnabled = isElevated || !isOnceMode;
+    // The SCM refuses StartService with error 1058 when the service is
+    // disabled, so Start is unavailable rather than a guaranteed failure.
+    final startupDisabled = _controller.startupType == StartupType.disabled;
 
     return SingleChildScrollView(
       child: Column(
@@ -458,20 +461,59 @@ class _ServiceTabState extends State<ServiceTab> {
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          Semantics(
-                            button: true,
-                            label: 'Start Service',
-                            child: ShadButton(
-                              onPressed: _controller.isLoading ? null : _controller.start,
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
+                          if (startupDisabled)
+                            SizedBox(
+                              width: constraints.maxWidth,
+                              child: Row(
                                 children: [
-                                  Icon(LucideIcons.play, size: 14),
-                                  SizedBox(width: 6),
-                                  Text('Start'),
+                                  Icon(
+                                    LucideIcons.info,
+                                    size: 14,
+                                    color: theme.colorScheme.mutedForeground,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'Start is unavailable — the startup type is Disabled. Set it to Manual or Automatic in the Startup Type section below.',
+                                      style: theme.textTheme.small.copyWith(
+                                        color: theme.colorScheme.mutedForeground,
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
+                          Builder(
+                            builder: (context) {
+                              final startBtn = Semantics(
+                                button: true,
+                                label: 'Start Service',
+                                child: ShadButton(
+                                  onPressed: (_controller.isLoading ||
+                                          startupDisabled)
+                                      ? null
+                                      : _controller.start,
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(LucideIcons.play, size: 14),
+                                      SizedBox(width: 6),
+                                      Text('Start'),
+                                    ],
+                                  ),
+                                ),
+                              );
+
+                              if (startupDisabled) {
+                                return DisabledActionWrapper(
+                                  enabled: false,
+                                  tooltip:
+                                      'Startup type is Disabled — the service cannot be started. Change it to Manual or Automatic in the Startup Type section below.',
+                                  child: startBtn,
+                                );
+                              }
+                              return startBtn;
+                            },
                           ),
                           Builder(
                             builder: (context) {

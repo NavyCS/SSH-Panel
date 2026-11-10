@@ -68,14 +68,14 @@ class AppCredit extends StatelessWidget {
   /// URL, and nothing enforces that they agree, so change both together.
   static const String githubUrl = 'https://github.com/NavyCS/SSH-Panel';
 
-  /// How the app version is shown in the credit: `v1.0`.
+  /// How the app version is shown in the credit: `v1.0.2`.
   ///
-  /// Derived from `version:` in pubspec.yaml, which reads `1.0.0+1` — the
-  /// `+1` is the build number, which nobody wants to read in a title bar, and
-  /// the patch level is noise at this stage. A test reads pubspec and asserts
-  /// this matches its major.minor, so bumping one without the other fails the
-  /// suite instead of silently shipping a stale number.
-  static const String versionLabel = 'v1.0';
+  /// Derived from `version:` in pubspec.yaml, which reads `1.0.2+2` — the
+  /// `+2` is the build number, which nobody wants to read in a title bar.
+  /// A test reads pubspec and asserts this matches its major.minor.patch, so
+  /// bumping one without the other fails the suite instead of silently
+  /// shipping a stale number.
+  static const String versionLabel = 'v1.0.2';
 
   /// The box's own inset, the one value here that is not a theme token.
   ///
@@ -134,7 +134,7 @@ class AppCredit extends StatelessWidget {
           // line box and 2px still reads as two lines rather than one block.
           const SizedBox(height: lineGap),
           // The attribution and the link share the second line, so the credit
-          // reads as one sentence: "by navy_cs (v1.0): github".
+          // reads as one sentence: "by navy_cs (v1.0.2): github".
           // Both halves shrink. A bare Text or a bare link in a Row with
           // mainAxisSize.min gets unbounded width, so its ellipsis never
           // engages and the row overflows the title bar: measured 228px at one

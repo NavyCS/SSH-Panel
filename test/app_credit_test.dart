@@ -67,7 +67,7 @@ void main() {
         (tester) async {
       await tester.pumpWidget(harness(const AppCredit()));
 
-      // "by navy_cs (v1.0): github" reads as one sentence, so the two halves
+      // "by navy_cs (v1.0.2): github" reads as one sentence, so the two halves
       // have to share a baseline rather than stacking.
       final attribution = tester.getRect(
         find.text('by navy_cs (${AppCredit.versionLabel}): '),
@@ -87,10 +87,10 @@ void main() {
     });
 
     test('the shown version matches the one in pubspec.yaml', () {
-      // One source of truth. pubspec says `version: 1.0.0+1`; the credit shows
-      // major.minor, dropping the build number and the patch level. Bumping the
-      // app version without updating the credit used to be a silent drift, and
-      // this fails instead.
+      // One source of truth. pubspec says `version: 1.0.2+2`; the credit shows
+      // major.minor.patch, dropping the build number. Bumping the app version
+      // without updating the credit used to be a silent drift, and this fails
+      // instead.
       final pubspec = File('pubspec.yaml');
       expect(
         pubspec.existsSync(),
@@ -102,11 +102,11 @@ void main() {
           .firstMatch(pubspec.readAsStringSync());
       expect(match, isNotNull, reason: 'pubspec must declare a version');
 
-      // `1.0.0+1` -> `1.0`: drop the build number, then keep major.minor.
+      // `1.0.2+2` -> `1.0.2`: drop the build number, keep major.minor.patch.
       final withoutBuild = match!.group(1)!.split('+').first;
       final parts = withoutBuild.split('.');
-      expect(parts.length, greaterThanOrEqualTo(2));
-      final expected = 'v${parts[0]}.${parts[1]}';
+      expect(parts.length, greaterThanOrEqualTo(3));
+      final expected = 'v${parts[0]}.${parts[1]}.${parts[2]}';
 
       expect(
         AppCredit.versionLabel,

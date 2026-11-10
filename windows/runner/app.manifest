@@ -3,7 +3,7 @@
   <assemblyIdentity
     type="win32"
     name="SSH Panel"
-    version="1.0.0.0"
+    version="1.0.2.0"
     processorArchitecture="amd64"
   />
   <description>SSH Panel - manage OpenSSH ssh-agent, keys and domains</description>
